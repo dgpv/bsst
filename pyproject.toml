@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools"]
+
+[project]
+name = "bsst"
+version = "0.1.0.pre0"
+authors = [{name = "Dmitry Petukhov", email = "dp@bsst.dev"}]
+license = {file = "LICENSE.md"}
+description = ""
+keywords = [
+    "bitcoin",
+    "elements",
+    "z3",
+]
+readme = "README.md"
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: Free for non-commercial use",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3 :: Only",
+    "Typing :: Typed",
+]
+requires-python = ">=3.10"
+
+[project.urls]
+Homepage = "https://github.com/dgpv/bsst"
+
+[project.optional-dependencies]
+z3 = [
+    "z3-solver",
+]
+
+[tool.setuptools]
+license-files = ["LICENSE.md"]
+zip-safe = false
+include-package-data = false
+
+[project.scripts]
+bsst-cli = "bsst:main_cli"

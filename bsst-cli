@@ -1,0 +1,7 @@
+#!/usr/bin/python3
+
+import sys
+from bsst import main_cli
+
+if __name__ == '__main__':
+    sys.exit(main_cli())
