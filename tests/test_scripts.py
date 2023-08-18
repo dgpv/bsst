@@ -1,0 +1,305 @@
+#!/usr/bin/env python3
+
+import sys
+from contextlib import contextmanager
+from typing import Generator
+from io import StringIO
+
+import bsst
+
+# pylama:ignore=E501
+
+
+@contextmanager
+def CaptureStdout() -> Generator[StringIO, None, None]:
+    save_stdout = sys.stdout
+    out = StringIO()
+    sys.stdout = out
+    yield out
+    sys.stdout = save_stdout
+
+
+@contextmanager
+def FreshEnv(*, z3_enabled: bool = False, is_tapscript: bool = False,
+             ) -> Generator[bsst.SymEnvironment, None, None]:
+    env = bsst.SymEnvironment()
+    env.is_elements = True
+    env.z3_enabled = z3_enabled
+    if is_tapscript:
+        env.sigversion = bsst.SigVersion.TAPSCRIPT
+    else:
+        env.sigversion = bsst.SigVersion.BASE
+
+    with bsst.CurrentEnvironment(env):
+        bsst.try_import_optional_modules()
+        with bsst.CurrentExecContext(env.get_root_branch().context):
+            yield env
+
+
+valid_contexts: list[bsst.ExecContext] = []
+invalid_contexts: list[bsst.ExecContext] = []
+failures: list[str] = []
+
+
+def clean_contexts() -> None:
+    valid_contexts.clear()
+    invalid_contexts.clear()
+    failures.clear()
+
+
+def process_contexts(env: bsst.SymEnvironment) -> None:
+    def do_processing(bp: 'bsst.Branchpoint', level: int) -> None:
+        if bp.context is not None:
+            if bp.context.failure:
+                invalid_contexts.append(bp.context)
+                err = bp.context.failure[1]
+                if err.startswith(bsst.SCRIPT_FAILURE_PREFIX_SOLVER):
+                    for fc in bsst.parse_failcodes(err):
+                        failures.append(fc[0])
+                else:
+                    failures.append(err)
+            else:
+                valid_contexts.append(bp.context)
+
+    clean_contexts()
+    root_bp = env.get_root_branch()
+    root_bp.walk_branches(do_processing)
+
+
+def do_test_single(script: str, *,
+                   z3_enabled: bool = False, is_tapscript: bool = False,
+                   num_failures: int | None = None,
+                   num_successes: int | None = None,
+                   ) -> list[str]:
+    print(f'script: {script}')
+    print(f'z3_enabled: {z3_enabled}')
+    print()
+
+    with FreshEnv(z3_enabled=z3_enabled, is_tapscript=is_tapscript) as env:
+        (bsst.g_script_body,
+         bsst.g_line_no_table,
+         bsst.g_var_save_positions) = bsst.get_opcodes(script.split('\n'))
+
+        bsst.g_is_in_processing = True
+        bsst.symex_script()
+        bsst.g_is_in_processing = False
+        bsst.report()
+
+        process_contexts(env)
+
+        assert len(valid_contexts) == (1 if num_successes is None else num_successes), len(valid_contexts)
+        if not num_failures:
+            assert len(invalid_contexts) == 0
+        else:
+            assert len(invalid_contexts) > 0
+
+        return failures
+
+
+def do_test(script: str, *,
+            num_failures: int | None = None,
+            num_successes: int | None = None,
+            is_tapscript: bool = False) -> None:
+    do_test_single(script, z3_enabled=False,
+                   is_tapscript=is_tapscript, num_failures=num_failures,
+                   num_successes=num_successes)
+    do_test_single(script, z3_enabled=True,
+                   is_tapscript=is_tapscript, num_failures=num_failures,
+                   num_successes=num_successes)
+
+
+def test() -> None:
+
+    failures = do_test_single("0x304502203e4516da7253cf068effec6b95c41221c0cf3a8e6ccb8cbf1725b562e9afde2c022100ab1e3da73d67e32045a20e0b999e049978ea8d6ee5480d485fcf2ce0d03b2ef001 0x03d8bd1a69a1337d2817cfc0fecc3247436b34903d7ae424316354b73114dcb1dd CHECKSIG",
+                              z3_enabled=False, num_successes=0, num_failures=1)
+    assert failures == ['check_signature_low_s']
+    failures = do_test_single("0x304402203e4516da7253cf068effec6b95c41221c0cf3a8e6ccb8cbf1725b562e9afde2c02207FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A101 0x03d8bd1a69a1337d2817cfc0fecc3247436b34903d7ae424316354b73114dcb1dd CHECKSIG",
+                              z3_enabled=False, num_successes=0, num_failures=1)
+    assert failures == ['check_signature_low_s']
+
+    failures = do_test_single("DUP 0x03d8bd1a69a1337d2817cfc0fecc3247436b34903d7ae424316354b73114dcb1dd CHECKSIG SWAP 0x304502203e4516da7253cf068effec6b95c41221c0cf3a8e6ccb8cbf1725b562e9afde2c022100ab1e3da73d67e32045a20e0b999e049978ea8d6ee5480d485fcf2ce0d03b2ef001 EQUALVERIFY",
+                              z3_enabled=True, num_successes=0, num_failures=1)
+    assert 'check_signature_low_s' in failures
+    failures = do_test_single("DUP 0x03d8bd1a69a1337d2817cfc0fecc3247436b34903d7ae424316354b73114dcb1dd CHECKSIG SWAP 0x304402203e4516da7253cf068effec6b95c41221c0cf3a8e6ccb8cbf1725b562e9afde2c02207FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A101 EQUALVERIFY",
+                              z3_enabled=True, num_successes=0, num_failures=1)
+    assert 'check_signature_low_s' in failures
+
+    do_test_single("DUP 0 BOOLOR SWAP 0 EQUALVERIFY",
+                   z3_enabled=False, num_successes=1, num_failures=0)
+    do_test_single("DUP 0 BOOLOR SWAP 0 EQUALVERIFY",
+                   z3_enabled=True, num_successes=0, num_failures=1)
+
+    # 0-value output unspendable because of OP_RETURN
+    do_test("DUP INSPECTOUTPUTVALUE 1 EQUALVERIFY le64(0) EQUALVERIFY INSPECTOUTPUTSCRIPTPUBKEY SWAP x('6a') SHA256 EQUALVERIFY -1 NUMEQUAL",
+            is_tapscript=True)
+    # 0-value output, but not unspendable (detectable only with z3)
+    do_test_single("DUP INSPECTOUTPUTVALUE 1 EQUALVERIFY le64(0) EQUALVERIFY INSPECTOUTPUTSCRIPTPUBKEY SWAP x('6b') SHA256 EQUALVERIFY -1 NUMEQUAL",
+                   is_tapscript=True, z3_enabled=True, num_successes=0, num_failures=1)
+    # 0-value output, but witver is 0
+    do_test_single("DUP INSPECTOUTPUTVALUE 1 EQUALVERIFY le64(0) EQUALVERIFY INSPECTOUTPUTSCRIPTPUBKEY SWAP x('6a') SHA256 EQUALVERIFY 0 NUMEQUAL",
+                   is_tapscript=True, z3_enabled=True, num_failures=1, num_successes=0)
+
+    out: str = ''
+    with CaptureStdout() as output:
+        do_test_single("IF 2DUP EQUALVERIFY 1 EQUALVERIFY 1 EQUALVERIFY ELSE EQUALVERIFY ENDIF",
+                       z3_enabled=True, num_successes=2)
+        out = output.getvalue()
+
+    print(out)
+    assert ("IF wit0 @ 0:L1 : True\n---------------------\n\n        <*> EQUAL(wit1, wit2) @ 2:L1\n        <*> EQUAL(1, wit1) @ 4:L1\n        <*> EQUAL(1, wit2) @ 6:L1\n\n"
+            in out)
+
+    out = ''
+    with CaptureStdout() as output:
+        do_test_single("IF 2DUP 1 EQUALVERIFY 1 EQUALVERIFY ENDIF EQUALVERIFY",
+                       z3_enabled=True, num_successes=2)
+        out = output.getvalue()
+
+    print(out)
+    assert ("IF wit0 @ 0:L1 : True\n---------------------\n\n        <*> EQUAL(1, wit1) @ 3:L1\n        <*> EQUAL(1, wit2) @ 5:L1\n        {*} EQUAL(wit1, wit2) @ 7:L1\n\n"
+            in out)
+
+    failures = do_test_single("le64(1) x('1000000000000080') MUL64 DROP",
+                              z3_enabled=True, is_tapscript=True, num_successes=1, num_failures=1)
+    assert failures[0] == 'check_branch_condition_invalid'
+
+    # check int64 overflow
+    failures = do_test_single("le64(1) x('FFFFFFFFFFFFFF7F') ADD64 VERIFY",
+                              z3_enabled=False, is_tapscript=True, num_successes=0, num_failures=1)
+    assert failures[0] == 'check_invalid_arguments'
+    failures = do_test_single("le64(1) x('0000000000000080') SUB64 VERIFY",
+                              z3_enabled=False, is_tapscript=True, num_successes=0, num_failures=1)
+    assert failures[0] == 'check_invalid_arguments'
+    failures = do_test_single("le64(2) x('0000000000000080') MUL64 VERIFY",
+                              z3_enabled=False, is_tapscript=True, num_successes=0, num_failures=1)
+    assert failures[0] == 'check_invalid_arguments'
+    failures = do_test_single("x('FFFFFFF000000000') DUP MUL64 VERIFY",
+                              z3_enabled=False, is_tapscript=True, num_successes=0, num_failures=1)
+    assert failures[0] == 'check_invalid_arguments'
+    failures = do_test_single("x('FFFFFFFFFFFFFF7F') DUP ADD64 VERIFY",
+                              z3_enabled=False, is_tapscript=True, num_successes=0, num_failures=1)
+    assert failures[0] == 'check_invalid_arguments'
+    failures = do_test_single("x('0000000000000080') DUP ADD64 VERIFY",
+                              z3_enabled=False, is_tapscript=True, num_successes=0, num_failures=1)
+    assert failures[0] == 'check_invalid_arguments'
+    failures = do_test_single("le64(0) x('0000000000000080') SUB64 VERIFY",
+                              z3_enabled=False, is_tapscript=True, num_successes=0, num_failures=1)
+    assert failures[0] == 'check_invalid_arguments'
+
+    failures = do_test_single("DUP SCRIPTNUMTOLE64 x('FFFFFFFFFFFFFF7F') ADD64 VERIFY SWAP 1 NUMEQUALVERIFY",
+                              z3_enabled=True, is_tapscript=True, num_successes=0, num_failures=2)
+    assert not (set(failures) - set(['check_int64_out_of_bounds', 'check_numequalverify', 'check_verify']))
+    failures = do_test_single("DUP SCRIPTNUMTOLE64 x('0000000000000080') SUB64 VERIFY SWAP 1 NUMEQUALVERIFY",
+                              z3_enabled=True, is_tapscript=True, num_successes=0, num_failures=2)
+    assert not (set(failures) - set(['check_int64_out_of_bounds', 'check_numequalverify', 'check_verify']))
+    failures = do_test_single("DUP SCRIPTNUMTOLE64 x('0000000000000080') MUL64 VERIFY SWAP 2 NUMEQUALVERIFY",
+                              z3_enabled=True, is_tapscript=True, num_successes=0, num_failures=2)
+    assert not (set(failures) - set(['check_int64_out_of_bounds', 'check_numequalverify', 'check_verify']))
+    failures = do_test_single("DUP DUP MUL64 VERIFY SWAP x('FFFFFFF000000000') EQUALVERIFY",
+                              z3_enabled=True, is_tapscript=True, num_successes=0, num_failures=2)
+    assert not (set(failures) - set(['check_int64_out_of_bounds', 'check_equalverify', 'check_verify']))
+    failures = do_test_single("DUP DUP ADD64 VERIFY SWAP x('FFFFFFFFFFFFFF7F') EQUALVERIFY",
+                              z3_enabled=True, is_tapscript=True, num_successes=0, num_failures=2)
+    assert not (set(failures) - set(['check_int64_out_of_bounds', 'check_equalverify', 'check_verify']))
+    failures = do_test_single("DUP DUP ADD64 VERIFY SWAP x('0000000000000080') EQUALVERIFY",
+                              z3_enabled=True, is_tapscript=True, num_successes=0, num_failures=2)
+    assert not (set(failures) - set(['check_int64_out_of_bounds', 'check_equalverify', 'check_verify']))
+    failures = do_test_single("DUP x('0000000000000080') SUB64 VERIFY SWAP 0 SCRIPTNUMTOLE64 EQUALVERIFY",
+                              z3_enabled=True, is_tapscript=True, num_successes=0, num_failures=2)
+    assert not (set(failures) - set(['check_int64_out_of_bounds', 'check_equalverify', 'check_verify']))
+
+    # Invalid arguments, result will be out of bounds
+    do_test("x('FFFFFFFFFFFFFF7F') 1 SCRIPTNUMTOLE64 ADD64 VERIFY",
+            is_tapscript=True, num_successes=0, num_failures=1)
+    do_test_single("DUP INSPECTOUTPUTNONCE 1 INSPECTOUTPUTNONCE EQUAL SWAP 1 EQUALVERIFY NOT",
+                   is_tapscript=True, z3_enabled=True, num_successes=0, num_failures=1)
+    do_test("DUP x('00') SWAP CAT SWAP x('0080') EQUALVERIFY DUP IF DUP ENDIF x('000080') XOR 0 RSHIFT NOT",
+            num_successes=1, num_failures=1)
+    do_test("SIZE 32 NUMEQUALVERIFY SWAP SIZE 50 NUMEQUALVERIFY x('3033021a') SWAP CAT SWAP x('02') SWAP CAT CHECKSIG")
+    do_test_single("SIZE 32 NUMEQUALVERIFY SWAP SIZE 50 NUMEQUALVERIFY x('3033020a') SWAP CAT SWAP x('02') SWAP CAT CHECKSIG",
+                   z3_enabled=True, num_successes=0, num_failures=1)
+    do_test('1 DEPTH DEPTH 3 EQUALVERIFY 2 EQUALVERIFY ADD')
+    do_test('SIZE 0 EQUALVERIFY DUP CAT DUP CAT DUP CAT DUP CAT DUP CAT DUP CAT DUP CAT DUP CAT DUP CAT SIZE 0 NUMEQUALVERIFY NOT')
+    do_test("DUP 2 RIGHT 'B' SWAP CAT SWAP 'ABCD' EQUALVERIFY 'BCD' EQUAL")
+    do_test("DUP 2 3 SUBSTR 'F' CAT SWAP 2 RIGHT 'CDE' EQUALVERIFY 'CD' 'EF' CAT EQUAL")
+    do_test("DUP 6 RSHIFT SWAP 134 EQUALVERIFY 2 NUMEQUAL")
+    do_test("DUP 6 RSHIFT SWAP 4104 EQUALVERIFY x('40') EQUAL")
+    do_test("DUP 6 RSHIFT SWAP 4104 NUMEQUALVERIFY 64 NUMEQUAL")
+    do_test("DUP 0 RSHIFT SWAP x('0000') EQUALVERIFY 0 EQUAL")
+    do_test("DUP 0 RSHIFT SWAP x('0100') EQUALVERIFY 1 EQUAL")
+    do_test("DUP 8 RSHIFT SWAP x('0100') EQUALVERIFY 0 EQUAL")
+    do_test("DUP 16 RSHIFT SWAP x('000010') EQUALVERIFY 16 EQUAL")
+    do_test("DUP 32 RSHIFT SWAP x('00000000120000') EQUALVERIFY 18 EQUAL")
+    do_test("DUP 30 RSHIFT SWAP x('00000000120000') EQUALVERIFY 72 EQUAL")
+    do_test("DUP 17 RSHIFT SWAP x('000010') EQUALVERIFY 8 EQUAL")
+    do_test("DUP 11 RSHIFT SWAP x('0010') EQUALVERIFY 2 EQUAL")
+    do_test("DUP 6 LSHIFT SWAP 34 EQUALVERIFY 2176 EQUAL")
+    do_test("DUP 18 LSHIFT SWAP x('860000') EQUALVERIFY 35127296 NUMEQUAL")
+    do_test("DUP 9 LSHIFT SWAP x('8680') EQUALVERIFY 16845824 NUMEQUAL")
+    do_test("DUP 8 LSHIFT SWAP x('8600') EQUALVERIFY -1536 NUMEQUAL")
+    do_test("DUP 8 LSHIFT SWAP x('86') EQUALVERIFY -1536 NUMEQUAL")
+    do_test("DUP 8 LSHIFT SWAP 2 EQUALVERIFY 512 NUMEQUAL")
+    do_test("DUP 11 LSHIFT SWAP x('008000') EQUALVERIFY 67108864 EQUAL")
+    do_test("DUP 0 LSHIFT SWAP x('0000') EQUALVERIFY 0 EQUAL")
+    do_test("DUP 0 LSHIFT SWAP x('0100') EQUALVERIFY 1 EQUAL")
+    do_test("DUP INVERT SWAP 85 EQUALVERIFY x('aa') EQUAL")
+    do_test("DUP INVERT SWAP 84 NUMEQUALVERIFY x('ab') NUMEQUAL")
+    do_test("DUP INVERT SWAP x('aaaa00') EQUALVERIFY x('5555ff') EQUAL")
+    do_test("DUP x('99') XOR SWAP x('23') EQUALVERIFY x('ba') EQUAL")
+    do_test("DUP x('5511FF99') XOR SWAP x('22758399') EQUALVERIFY 8152183 NUMEQUAL")
+    do_test("DUP x('5511FF99') XOR SWAP x('22758390') EQUALVERIFY x('77647c09') EQUAL")
+    do_test("DUP x('5511FF99') XOR SWAP x('5511FF99') EQUALVERIFY x('00000000') EQUAL")
+    do_test("DUP x('5511FF99') AND SWAP x('22758399') EQUALVERIFY x('00118399') EQUAL")
+    do_test("DUP x('99') AND SWAP x('23') EQUALVERIFY 1 EQUAL")
+    do_test("DUP x('99') OR SWAP x('23') EQUALVERIFY x('bb') EQUAL")
+    do_test("DUP x('5511FF99') OR SWAP x('22758399') EQUALVERIFY x('7775ff99') EQUAL")
+    do_test("2DUP HASH256 SWAP HASH256 EQUALVERIFY EQUAL")
+    do_test("2DUP HASH256 SWAP HASH256 EQUAL NOT VERIFY EQUAL NOT")
+    do_test("2DUP SHA1 SWAP SHA1 EQUAL NOT VERIFY EQUAL NOT")
+    do_test("3DUP DUP 'AA' EQUALVERIFY SHA256INITIALIZE SIZE 42 EQUALVERIFY SWAP SHA256UPDATE SIZE 45 EQUALVERIFY SWAP SHA256FINALIZE TOALTSTACK DROP 'BBB' EQUALVERIFY 'CCCC' EQUALVERIFY DROP DROP FROMALTSTACK",
+            is_tapscript=True)
+    do_test("DUP x('00') SWAP CAT SWAP x('0080') EQUALVERIFY IFDUP x('000080') XOR 0 RSHIFT NOT",
+            num_failures=1)
+    do_test("DUP x('00') SWAP CAT SWAP x('0080') XOR 0 RSHIFT NOT VERIFY IFDUP x('000080') XOR 0 RSHIFT NOT",
+            num_failures=1)
+
+    do_test("DUP x('0100000000000080') SUB64 VERIFY SWAP 0 SCRIPTNUMTOLE64 EQUALVERIFY x('FFFFFFFFFFFFFF7F') EQUAL",
+            is_tapscript=True)
+    do_test("INSPECTVERSION LE32TOLE64 LE64TOSCRIPTNUM 1 EQUALVERIFY INSPECTVERSION x('01000000') EQUAL",
+            is_tapscript=True)
+
+    do_test("IFDUP NOTIF 1 EQUALVERIFY ENDIF EQUAL",
+            num_successes=2, num_failures=2)
+
+    do_test("0 INSPECTOUTPUTVALUE 1 EQUALVERIFY x('0a00000000000700') MUL64 1 EQUALVERIFY",
+            is_tapscript=True, num_failures=1)
+    do_test("0 INSPECTOUTPUTVALUE 1 EQUALVERIFY x('0a00000000000000') MUL64 1 EQUALVERIFY",
+            is_tapscript=True, num_failures=1)
+
+    failures = do_test_single("0 INSPECTOUTPUTVALUE 1 EQUALVERIFY DUP x('0a00000000000100') EQUALVERIFY x('0a00100000000000') MUL64 1 NUMEQUALVERIFY",
+                              z3_enabled=False, is_tapscript=True,
+                              num_successes=0, num_failures=1)
+    assert 'check_invalid_arguments' in failures
+    failures = do_test_single("0 INSPECTOUTPUTVALUE 1 EQUALVERIFY DUP x('0a00000000000100') EQUALVERIFY x('0a00100000000000') MUL64 1 NUMEQUALVERIFY",
+                              z3_enabled=True, is_tapscript=True,
+                              num_successes=0, num_failures=2)
+    assert not (set(failures) - set(['check_int64_out_of_bounds', 'check_le64_wrong_size', 'check_equalverify', 'check_numequalverify', 'check_branch_condition_invalid']))
+
+    do_test("DUP 10 GREATERTHAN IF 10 GREATERTHAN VERIFY ENDIF",
+            num_successes=2)
+
+    do_test("SIZE 32 NUMEQUALVERIFY 0 INSPECTOUTPUTSCRIPTPUBKEY -1 NUMEQUALVERIFY EQUALVERIFY",
+            is_tapscript=True)
+
+    do_test("mul64 1 equalverify", is_tapscript=True, num_failures=1)
+
+    do_test_single("MUL64 TOALTSTACK ADD64 FROMALTSTACK VERIFY VERIFY",
+                   is_tapscript=True, z3_enabled=False, num_failures=3)
+    do_test_single("MUL64 TOALTSTACK ADD64 FROMALTSTACK VERIFY VERIFY",
+                   is_tapscript=True, z3_enabled=True, num_failures=6)
+
+    do_test("DUP DUP VERIFY IF VERIFY ELSE 2 ENDIF", num_failures=1)
+
+
+if __name__ == '__main__':
+    test()

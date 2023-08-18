@@ -3,7 +3,7 @@
 
 Copyright (c) 2023 Dmitry Petukhov (https://github.com/dgpv), dp@bsst.dev
 
-NOTE: this is work-in progress: Automatic tests is not yet added
+NOTE: this is work-in-progress: Automatic tests are not yet added
 
 Symbolically executes the opcodes, checks constraints that opcodes impose on
 values they process, and shows the report with conditions that the script
@@ -175,11 +175,17 @@ The command line interface may also change, but the changes will be noted in [Re
 
 ## Installation
 
+Simply clone the repo:
+
 `git clone https://github.com/dgpv/bsst/`
 
 `cd bsst`
 
 `./bsst-cli --help`
+
+The file `bsst/__init__.py` is itself a runnable script without any mandatory dependencies except python standard library.
+It is possible to just copy `bsst/__init__.py` into a convenient location under convenient name, and run it directly,
+without installing `bsst` python module.
 
 ## Usage:
 
@@ -209,7 +215,8 @@ The command line interface may also change, but the changes will be noted in [Re
         will be employed to track and enforce constraints on values processed
         by the script. This will significantly improve the thoroughness of
         the analysis.
-        If false, the analysis will be fast, but not as thorough
+        If false, the analysis will be fast, but not as thorough, much fewer
+        issues may be detected
 
   --z3-debug=false
 

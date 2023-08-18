@@ -154,7 +154,8 @@ class SymEnvironment:
         will be employed to track and enforce constraints on values processed
         by the script. This will significantly improve the thoroughness of
         the analysis.
-        If false, the analysis will be fast, but not as thorough
+        If false, the analysis will be fast, but not as thorough, much fewer
+        issues may be detected
         """
         return self._z3_enabled
 
@@ -953,6 +954,7 @@ class SymEnvironment:
         self._root_branch: Optional['Branchpoint'] = None
         self._enabled_opcodes: list['OpCode'] = []
         self._solver: Optional['z3.Solver'] = None
+        self._failure_code: Optional['z3.ArithRef'] = None
 
     def get_solver(self) -> 'z3.Solver':
         if not self.z3_enabled:
@@ -962,6 +964,15 @@ class SymEnvironment:
             self._solver = z3.Solver()
 
         return self._solver
+
+    def get_failure_code(self) -> Union[int, 'z3.ArithRef']:
+        if self.z3_enabled:
+            if self._failure_code is None:
+                self._failure_code = Int('failure_code')
+
+            return self._failure_code
+
+        return -1
 
     @classmethod
     def is_option(cls, name: str) -> bool:
@@ -1102,12 +1113,7 @@ class SymEnvironment:
 MANUAL_TRACKED_ASSERTION_PREFIX = '_line_'
 TOTAL_TRACKED_ASSERTION_PREFIX = '_tracked_'
 
-MIN_TX_VERSION = 0
-MAX_TX_VERSION = 2
-
-assert MIN_TX_VERSION > -0x80000000, \
-    ("we use tx.nVersion.as_Int(), and as_Int() represents scriptnum, "
-        "so -0x80000000 is not representable")
+POSSIBLE_TX_VERSIONS = (0, 1, 2)
 
 MAX_PUBKEYS_PER_MULTISIG = 20
 MAX_OPS_PER_SCRIPT_SEGWIT_MODE = 201
@@ -1189,8 +1195,6 @@ def FreshConst(sort: Any, prefix: str) -> 'z3.ExprRef':
 
     return z3.FreshConst(sort, prefix)
 
-
-g_failure_code: Union[int, 'z3.Int']
 
 SCRIPT_FAILURE_PREFIX_SOLVER = ':solver:'
 
@@ -1597,7 +1601,8 @@ def _get_byte_bounding_exp(src: 'z3.SeqSortRef', size: int) -> 'z3.BoolRef':
 
 def _decode_scriptnum(src: 'z3.SeqSortRef', dst: 'z3.ArithRef', size: int,
                       src_len: 'z3.ArithRef') -> 'z3.BoolRef':
-    assert size > 0
+    if size == 0:
+        return dst == 0
 
     v = src[0]
     for idx in range(size-1):
@@ -1689,15 +1694,15 @@ def _get_le_byteread_exp(bits: int, src: 'z3.SeqSortRef') -> 'z3.ArithRef':
     return read_exp
 
 
-def _le_unsigned_to_integer_exp(bits: int, src: 'z3.SeqSortRef', dst: 'z3.ArithRef',
-                                ) -> 'z3.BoolRef':
+def le_unsigned_to_integer_exp(bits: int, src: 'z3.SeqSortRef', dst: 'z3.ArithRef',
+                               ) -> 'z3.BoolRef':
     size = bits // 8
     return And(_get_byte_bounding_exp(src, size),
                dst == _get_le_byteread_exp(bits, src))
 
 
-def _le_signed_to_integer_exp(bits: int, src: 'z3.SeqSortRef', dst: 'z3.ArithRef',
-                              ) -> 'z3.BoolRef':
+def le_signed_to_integer_exp(bits: int, src: 'z3.SeqSortRef', dst: 'z3.ArithRef',
+                             ) -> 'z3.BoolRef':
     size = bits // 8
     rexp = _get_le_byteread_exp(bits, src)
     return And(_get_byte_bounding_exp(src, size),
@@ -1709,25 +1714,25 @@ def _le_signed_to_integer_exp(bits: int, src: 'z3.SeqSortRef', dst: 'z3.ArithRef
 def le32_signed_to_integer(src: 'z3.SeqSortRef', dst: 'z3.ArithRef') -> None:
     if cur_env().z3_enabled:
         Check(Length(src) == 4, err_le32_wrong_size())
-        Check(_le_signed_to_integer_exp(32, src, dst))
+        Check(le_signed_to_integer_exp(32, src, dst))
 
 
 def le32_unsigned_to_integer(src: 'z3.SeqSortRef', dst: 'z3.ArithRef') -> None:
     if cur_env().z3_enabled:
         Check(Length(src) == 4, err_le32_wrong_size())
-        Check(_le_unsigned_to_integer_exp(32, src, dst))
+        Check(le_unsigned_to_integer_exp(32, src, dst))
 
 
 def le64_signed_to_integer(src: 'z3.SeqSortRef', dst: 'z3.ArithRef') -> None:
     if cur_env().z3_enabled:
         Check(Length(src) == 8, err_le64_wrong_size())
-        Check(_le_signed_to_integer_exp(64, src, dst))
+        Check(le_signed_to_integer_exp(64, src, dst))
 
 
 def le64_unsigned_to_integer(src: 'z3.SeqSortRef', dst: 'z3.ArithRef') -> None:
     if cur_env().z3_enabled:
         Check(Length(src) == 8, err_le64_wrong_size())
-        Check(_le_unsigned_to_integer_exp(64, src, dst))
+        Check(le_unsigned_to_integer_exp(64, src, dst))
 
 
 def If(cond: Union[bool, 'z3.BoolRef'],
@@ -1941,7 +1946,8 @@ def z3add(exp: 'z3.BoolRef',  # noqa
 
     # Add constraints for failure codes, if any
     for name in (set(env.tracked_failure_codes.keys()) - tracked_names):
-        code_exp = (g_failure_code != env.tracked_failure_codes[name])
+        code_exp = (env.get_failure_code() != env.tracked_failure_codes[name])
+        assert not isinstance(code_exp, bool), (code_exp, name, None)
         env.z3_current_constraints_frame.append((code_exp, name, None))
         if env.use_z3_incremental_mode:
             z3_solver_add(code_exp, name)
@@ -1966,8 +1972,9 @@ def z3add(exp: 'z3.BoolRef',  # noqa
 
     if env.dont_use_tracked_assertions_for_error_codes and code is not None:
         # code was set but track_name is empty: using code for checks
-        exp = z3.Implies(z3.Not(exp), g_failure_code == code)
+        exp = z3.Implies(z3.Not(exp), env.get_failure_code() == code)
 
+    assert not isinstance(exp, bool), (exp, track_name, ecpair)
     env.z3_current_constraints_frame.append((exp, track_name, ecpair))
 
     if env.use_z3_incremental_mode:
@@ -2060,6 +2067,9 @@ def _z3check(  # noqa
     solver = env.get_solver()
 
     if not env.use_z3_incremental_mode:
+        for exp, tn, ecpair in get_current_constraints():
+            assert not isinstance(exp, bool), (exp, tn, ecpair)
+
         current_assertions = [(z3.simplify(exp), tn, ecpair)
                               for exp, tn, ecpair in get_current_constraints()]
         if not env.disable_z3_randomization:
@@ -2202,21 +2212,14 @@ def use_as_script_bool(v: 'SymData') -> Union[int, 'z3.ArithRef']:
     data = v.use_as_ByteSeq()
     data_len = v.Length()
 
-    tmpseq = FreshConst(IntSeqSortRef(), 'boolcast_seq')
-    idx = FreshInt('idx')
+    bigzero = IntSeqVal(b'\x00'*MAX_SCRIPT_ELEMENT_SIZE)
+    big_negative_zero = IntSeqVal(b'\x00'*(MAX_SCRIPT_ELEMENT_SIZE-1) + b'\x80')
 
-    Check(Length(tmpseq) == data_len)
-    Check(z3.ForAll(idx, Implies(And(idx >= 0, idx < data_len),
-                                 tmpseq[idx]
-                                 == If(idx + 1 == data_len,
-                                       If(Or(data[idx] == 0,
-                                             data[idx] == 0x80),
-                                          0, 1),
-                                       If(tmpseq[idx+1] == 0,
-                                          If(data[idx] == 0, 0, 1),
-                                          1)))))
-
-    return If(data_len == 0, 0, tmpseq[0])
+    return If(Or(z3.Extract(bigzero, MAX_SCRIPT_ELEMENT_SIZE-data_len, data_len)
+                 == data,
+                 z3.Extract(big_negative_zero, MAX_SCRIPT_ELEMENT_SIZE-data_len, data_len)
+                 == data),
+              0, 1)
 
 
 def maybe_enforce_equality_when_z3_disabled(a: 'SymData', b: 'SymData',
@@ -2253,7 +2256,7 @@ def is_cond_possible(  # noqa
             env.solving_log(f'  check {name or sd} ')
 
     if sd:
-        sd_failcode = sd.get_failcode('possible')
+        sd_failcode = sd.get_failcode_dispatcher('possible')
 
     try:
         if sd:
@@ -2603,8 +2606,9 @@ def add_amount_constraints(*, prefix: 'SymData', value: 'SymData',
     Check((pfx == 1) == (value.Length() == 8))
     Check(Or(pfx == 8, pfx == 9) == (value.Length() == 32))
     Check(Implies(pfx == 1,
-                  Implies(Or(value.as_Int64() < 0, value.as_Int64() > MAX_MONEY),
-                          g_failure_code == err_out_of_money_range().get_code())))
+                  And(le_signed_to_integer_exp(64, value.as_ByteSeq(), value.as_Int64()),
+                      value.as_Int64() >= 0, value.as_Int64() <= MAX_MONEY)),
+          err_out_of_money_range())
 
 
 def add_scriptpubkey_constraints(*, witver: 'SymData', witprog: 'SymData'
@@ -3464,7 +3468,6 @@ class ConstrainedValue:
         self, *_values: Union[T_ConstrainedValueValue, bytearray],
         value_name: str = ''
     ) -> None:
-
         if not _values:
             raise ValueError('values are not specified')
 
@@ -3621,7 +3624,7 @@ class ConstrainedValue:
             if v > max_value:
                 raise ScriptFailure(f'scriptnum value above {max_value}')
             if v < min_value:
-                raise ScriptFailure('scriptnum value below {min_value}')
+                raise ScriptFailure(f'scriptnum value below {min_value}')
             r = v
         elif isinstance(v, IntLE64):
             raise ScriptFailure('LE64 cannot be converted to scriptnum')
@@ -3716,14 +3719,8 @@ class TxValuesDict:
             return
 
         sortref = self._sym_fun.range()
-        if isinstance(sortref, z3.ArithSortRef):
-            sym_v = value.as_Int()
-        elif isinstance(sortref, z3.SeqSortRef):
-            sym_v = value.as_ByteSeq()
-        else:
-            raise AssertionError('unhandled value type')
-
-        z3add(self._sym_fun(key) == sym_v)
+        assert isinstance(sortref, z3.SeqSortRef)
+        z3add(self._sym_fun(key) == value.use_as_ByteSeq())
 
     def as_ref(self, key: Union[int, 'z3.ArithSortRef']) -> Union['z3.ExprRef', bytes]:
         value = self[key]
@@ -3782,6 +3779,7 @@ class TransactionFieldValues:
     def num_inputs(self) -> 'SymData':
         if self._num_inputs is None:
             self._num_inputs = SymData(name='tx_num_inputs')
+            self._num_inputs.use_as_Int()
             Check(And(self._num_inputs.as_Int() >= 0,
                       self._num_inputs.as_Int() <= cur_env().max_num_inputs))
 
@@ -3791,6 +3789,7 @@ class TransactionFieldValues:
     def num_outputs(self) -> 'SymData':
         if self._num_outputs is None:
             self._num_outputs = SymData(name='tx_num_outputs')
+            self._num_outputs.use_as_Int()
             Check(And(self._num_outputs.as_Int() >= 0,
                       self._num_outputs.as_Int() <= cur_env().max_num_outputs))
 
@@ -3799,16 +3798,19 @@ class TransactionFieldValues:
     @property
     def nVersion(self) -> 'SymData':
         if self._nVersion is None:
-            self._nVersion = SymData(name='tx_nVersion')
-            Check(And(self._nVersion.as_Int() >= MIN_TX_VERSION,
-                      self._nVersion.as_Int() <= MAX_TX_VERSION))
+            self._nVersion = SymData(name='tx_nVersion',
+                                     possible_sizes=(4,))
+            self._nVersion.use_as_ByteSeq()
+            Check(Or(*(self._nVersion.as_ByteSeq() == IntSeqVal(struct.pack('<i', v))
+                       for v in POSSIBLE_TX_VERSIONS)))
 
         return self._nVersion
 
     @property
     def nLockTime(self) -> 'SymData':
         if self._nLockTime is None:
-            self._nLockTime = SymData(name='tx_nLockTime')
+            self._nLockTime = SymData(name='tx_nLockTime', possible_sizes=(4,))
+            self._nLockTime.use_as_ByteSeq()
 
         return self._nLockTime
 
@@ -3816,6 +3818,7 @@ class TransactionFieldValues:
     def weight(self) -> 'SymData':
         if self._weight is None:
             self._weight = SymData(name='tx_weight')
+            self._weight.use_as_Int()
             Check(And(self._weight.as_Int() >= 0,
                       self._weight.as_Int() <= cur_env().max_tx_size*4))
 
@@ -3825,6 +3828,7 @@ class TransactionFieldValues:
     def current_input_index(self) -> 'SymData':
         if self._current_input_index is None:
             self._current_input_index = SymData(name='current_input')
+            self._current_input_index.use_as_Int()
             Check(
                 And(self._current_input_index.as_Int() >= 0,
                     self._current_input_index.as_Int() < self.num_inputs.as_Int()))
@@ -4243,7 +4247,7 @@ class SymData:
 
         self._failcodes: dict[str, 'FailureCodeDispatcher'] = {}
 
-    def get_failcode(self, prefix: str) -> 'FailureCodeDispatcher':
+    def get_failcode_dispatcher(self, prefix: str) -> 'FailureCodeDispatcher':
         fc = self._failcodes.get(prefix)
         if fc is None:
             fc = FailureCodeDispatcher(f'{prefix}_{self.unique_name}')
@@ -4771,9 +4775,6 @@ class SymData:
         if len(self.possible_sizes) == 1:
             return self.possible_sizes[0]
 
-        if not cur_env().z3_enabled and self.known_bool_value is not None:
-            return 1 if self.known_bool_value else 0
-
         assert not self.is_static
 
         if self._Length is None:
@@ -4908,7 +4909,10 @@ class SymData:
     def known_bool_value(self) -> bool | None:
         return cur_context().known_bool_values.get(self._unique_name)
 
-    def set_known_bool(self, value: bool) -> None:
+    def set_known_bool(self, value: bool, set_size: bool = False) -> None:
+        if set_size:
+            self.set_possible_sizes(int(value))
+
         cur_context().known_bool_values[self._unique_name] = value
 
 
@@ -5029,6 +5033,9 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                 raise ScriptFailure(
                     f'expected 8 bytes for first arg, got {len(v.as_bytes())}')
             v.set_static(IntLE64.from_int(v.as_le64()))
+
+        v.use_as_Int64()
+
         return v
 
     def push(v: SymData) -> None:
@@ -5052,6 +5059,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
         name_pseudo_arg = SymData(name=op.name)
         sf = SymData(name='SUCCESS_FLAG', args=(name_pseudo_arg, *args),
                      possible_sizes=(1, 0))
+        sf.use_as_Int()
         # help solver by adding explicit assertions about this value
         Check(Or(sf.as_Int() == 1, sf.as_Int() == 0))
         Check(Implies(sf.Length() == 1, sf.as_ByteSeq()[0] == 1))
@@ -5171,7 +5179,9 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
             bn1 = stacktop(-1)
             csv = SymData(name='CSV', args=(bn1,))
 
-            Check(Or(tx.nVersion.as_Int() >= 2), err_bad_tx_version())
+            tx_nVersion = FreshInt('tx_nVersion')
+            le32_unsigned_to_integer(tx.nVersion.as_ByteSeq(), tx_nVersion)
+            Check(Or(tx_nVersion >= 2), err_bad_tx_version())
 
             nsequence = bn1.use_as_Int(max_size=5)
 
@@ -5249,14 +5259,6 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
 
                 new_context.vfExec.append(False)
 
-                def set_static_cond_when_z3_disabled(expected_cond_int: int) -> None:
-                    if not env.z3_enabled:
-                        if env.sigversion == SigVersion.TAPSCRIPT or \
-                                env.minimaldata_flag:
-                            cond.set_static(expected_cond_int)
-                        else:
-                            cond.set_known_bool(bool(expected_cond_int))
-
                 def fail_on_invalid_cond() -> None:
                     expected_cond_int = int(not fValue)
 
@@ -5264,7 +5266,8 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                           err_branch_condition_invalid(),
                           enforcement_condition=cond)
 
-                    set_static_cond_when_z3_disabled(expected_cond_int)
+                    if not env.z3_enabled:
+                        cond.set_known_bool(bool(expected_cond_int))
 
                     z3check()
 
@@ -5281,7 +5284,8 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                       err_branch_condition_invalid(),
                       enforcement_condition=cond)
 
-                set_static_cond_when_z3_disabled(expected_cond_int)
+                if not env.z3_enabled:
+                    cond.set_known_bool(bool(expected_cond_int))
 
                 z3check()
 
@@ -5406,16 +5410,16 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
 
             new_context = ctx.branch(cond=cond)
 
-            new_context.run_on_start(lambda: cond.set_known_bool(False))
             new_context.run_on_start(
                 lambda: Check(use_as_script_bool(cond) == 0,
                               err_branch_condition_invalid(),
                               enforcement_condition=cond))
+            new_context.run_on_start(lambda: cond.set_known_bool(False))
 
-            cond.set_known_bool(True)
             Check(use_as_script_bool(cond) != 0,
                   err_branch_condition_invalid(),
                   enforcement_condition=cond)
+            cond.set_known_bool(True)
 
             z3check()
 
@@ -6118,7 +6122,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
             vchSig.use_as_ByteSeq()
             bn.use_as_Int()
             vchPubKey.use_as_ByteSeq()
-            r.use_as_ByteSeq()
+            r.use_as_Int()
 
             maybe_upgradeable_pub = add_xonly_pubkey_constraints(vchPubKey)
             add_schnorr_sig_constraints(vchSig, maybe_upgradeable_pub)
@@ -6277,7 +6281,9 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
             if bnMin.is_static and bnMax.is_static:
                 if bnMin.as_scriptnum_int() == bnMax.as_scriptnum_int():
                     r.set_static(bnMin.as_scriptnum_int())
-            else:
+
+            if not r.is_static:
+                r.use_as_Int()
                 Check(And(r.as_Int() >= bnMin.as_Int(),
                           r.as_Int() < bnMin.as_Int() + bnMax.as_Int()))
 
@@ -6573,7 +6579,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
 
                     # There are no spendable 0-value outputs
                     Check(Implies(pfx.as_ByteSeq()[0] == 1,
-                                  value.as_Int64() != 0))
+                                  value.as_ByteSeq() != IntSeqVal(b'\x00'*8)))
 
                 z3check()
 
@@ -6677,20 +6683,21 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                     add_amount_constraints(prefix=infk_pfx, value=infkeys)
                     add_amount_constraints(prefix=iamount_pfx, value=iamount)
 
+                    bytes_int64_zero = IntSeqVal(b'\x00'*8)
                     # In a non-null assetissuance, either inflation keys are
                     # non-null, or issuance amount is non-null, or both
                     Check(Implies(And(iamount_pfx.as_ByteSeq()[0] == 1,
-                                      iamount.as_Int64() == 0),
+                                      iamount.as_ByteSeq() == bytes_int64_zero),
                                   Or(infk_pfx.as_ByteSeq()[0] != 1,
-                                     infkeys.as_Int64() != 0)))
+                                     infkeys.as_ByteSeq() != bytes_int64_zero)))
                     Check(Implies(And(infk_pfx.as_ByteSeq()[0] == 1,
-                                      infkeys.as_Int64() == 0),
-                                  Or(iamount.as_ByteSeq()[0] != 1,
-                                     iamount.as_Int64() != 0)))
+                                      infkeys.as_ByteSeq() == bytes_int64_zero),
+                                  Or(iamount_pfx.as_ByteSeq()[0] != 1,
+                                     iamount.as_ByteSeq() != bytes_int64_zero)))
 
                     # Only initial issuance can have reissuance tokens
                     Check(Implies(And(infk_pfx.as_ByteSeq()[0] == 1,
-                                      infkeys.as_Int64() == 0),
+                                      infkeys.as_ByteSeq() == bytes_int64_zero),
                                   asset_blinding_nonce.as_ByteSeq()
                                   == IntSeqVal(b'\x00'*32)))
 
@@ -6699,11 +6706,12 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                             cond=bn,
                             cond_designations=('Has issuance', 'No issuance'))
                         fflag = SymData(name=f'{op.name}_FAILURE_FLAG')
-                        new_context.run_on_start(lambda: fflag.set_known_bool(False))
+                        fflag.use_as_Int()
                         new_context.run_on_start(lambda: new_context.push(fflag))
                         new_context.run_on_start(
                             lambda: Check(fflag.as_Int() == 0, err_branch_condition_invalid(),
                                           enforcement_condition=fflag))
+                        new_context.run_on_start(lambda: fflag.set_known_bool(False, set_size=True))
 
                 z3check()
 
@@ -6733,7 +6741,6 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
         scope()
     elif op == OP_PUSHCURRENTINPUTINDEX:
 
-        tx.current_input_index.use_as_Int()
         push(tx.current_input_index)
 
     elif op in (OP_INSPECTOUTPUTASSET, OP_INSPECTOUTPUTVALUE,
@@ -6805,12 +6812,13 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                     # zero-length witprog is fee output in elements
                     out_witprog = tx.output_scriptpubkey_witprog.as_ref(index)
                     out_witver = tx.output_scriptpubkey_witver.as_ref(index)
-                    Check(Implies(
-                        And(pfx.as_ByteSeq()[0] == 1, value.as_Int64() == 0),
-                        Or(And(out_witver[0] == 0x81,  # -1
-                               out_witprog[0] == 0x6a),
-                           Length(out_witprog) > MAX_SCRIPT_SIZE,
-                           And(env.is_elements, Length(out_witprog) == 0))))
+                    op_return_hash = hashlib.sha256(b'\x6a').digest()
+                    Check(Implies(And(pfx.as_ByteSeq()[0] == 1,
+                                      value.as_ByteSeq() == IntSeqVal(b'\x00'*8)),
+                                  Or(And(out_witver[0] == 0x81,  # -1
+                                         out_witprog == IntSeqVal(op_return_hash)),
+                                     Length(out_witprog) > MAX_SCRIPT_SIZE,
+                                     Length(out_witprog) == 0)))
 
                 z3check()
 
@@ -6876,27 +6884,22 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
         scope()
     elif op == OP_INSPECTVERSION:
 
-        tx.nVersion.use_as_Int()
         push(tx.nVersion)
 
     elif op == OP_INSPECTLOCKTIME:
 
-        tx.nLockTime.use_as_ByteSeq()
         push(tx.nLockTime)
 
     elif op == OP_INSPECTNUMINPUTS:
 
-        tx.num_inputs.use_as_Int()
         push(tx.num_inputs)
 
     elif op == OP_INSPECTNUMOUTPUTS:
 
-        tx.num_outputs.use_as_Int()
         push(tx.num_outputs)
 
     elif op == OP_TXWEIGHT:
 
-        tx.weight.use_as_Int()
         push(tx.weight)
 
     elif op in (OP_ADD64, OP_SUB64, OP_MUL64):
@@ -6920,27 +6923,52 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                     OP_MUL64: lambda a, b: a * b,
                 }
 
-            args_valid = And(r.as_Int64() >= IntLE64.MIN_VALUE,
-                             r.as_Int64() <= IntLE64.MAX_VALUE)
+            a = vcha.as_Int64()
+            b = vchb.as_Int64()
 
-            r_sf.set_as_Int(If(args_valid, 1, 0))
+            if op == OP_ADD64:
+                args_invalid = Or(And(a > 0, b > IntLE64.MAX_VALUE - a),
+                                  And(a < 0, b < IntLE64.MIN_VALUE - a))
+            elif op == OP_SUB64:
+                args_invalid = Or(And(b > 0, a < IntLE64.MIN_VALUE + b),
+                                  And(b < 0, a > IntLE64.MAX_VALUE + b))
+            elif op == OP_MUL64:
+                if (isinstance(a, int) and a == 0) or \
+                        (isinstance(b, int) and b == 0):
+                    args_invalid = False
+                else:
+                    def divide(mv: int, v: Union[int, 'z3.ArithRef']
+                               ) -> Union[int, 'z3.ArithRef']:
+                        if isinstance(v, int):
+                            return mv // v
+
+                        return mv / v
+
+                    args_invalid = Or(
+                        And(a > 0, b > 0, a > divide(IntLE64.MAX_VALUE, b)),
+                        And(a > 0, b < 0, b < divide(IntLE64.MIN_VALUE, a)),
+                        And(a < 0, b > 0, a < divide(IntLE64.MIN_VALUE, b)),
+                        And(a < 0, b < 0, b < divide(IntLE64.MAX_VALUE, a)))
+            else:
+                assert False, op
+
+            r_sf.set_as_Int(If(args_invalid, 0, 1))
 
             if not should_skip_immediately_failed_branch():
                 new_context = ctx.branch(
                     cond=(vcha, vchb),
                     cond_designations=('Success branch', 'Failure branch'))
-                new_context.run_on_start(lambda: r_sf.set_known_bool(False))
                 new_context.run_on_start(lambda: new_context.push(r_sf))
                 new_context.run_on_start(
-                    lambda: Check(r_sf.as_Int() == 0, err_invalid_arguments(),
+                    lambda: Check(r_sf.as_Int() == 0, err_branch_condition_invalid(),
                                   enforcement_condition=r_sf))
+                new_context.run_on_start(lambda: r_sf.set_known_bool(False, set_size=True))
 
-            r_sf.set_known_bool(True)
             Check(r_sf.as_Int() == 1, err_invalid_arguments(),
                   enforcement_condition=r_sf)
+            r_sf.set_known_bool(True, set_size=True)
 
-            r.set_as_Int64(op_table[op](vcha.use_as_Int64(),
-                                        vchb.use_as_Int64()))
+            r.set_as_Int64(op_table[op](vcha.as_Int64(), vchb.as_Int64()))
 
             z3check()
 
@@ -6956,8 +6984,8 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
             vcha = stacktop64(-2)
             vchb = stacktop64(-1)
 
-            a = vcha.use_as_Int64()
-            b = vchb.use_as_Int64()
+            a = vcha.as_Int64()
+            b = vchb.as_Int64()
 
             res = symresult(op, vcha, vchb)
 
@@ -6966,23 +6994,23 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
             rem = SymData(name='REMAINDER', args=(res,))
             qt = SymData(name='QUOTIENT', args=(res,))
 
-            args_valid = Not(Or(b == 0, And(b == -1, a == IntLE64.MIN_VALUE)))
+            args_invalid = Or(b == 0, And(b == -1, a == IntLE64.MIN_VALUE))
 
-            res_sf.set_as_Int(If(args_valid, 1, 0))
+            res_sf.set_as_Int(If(args_invalid, 0, 1))
 
             if not should_skip_immediately_failed_branch():
                 new_context = ctx.branch(
                     cond=(vcha, vchb),
                     cond_designations=('Success branch', 'Failure branch'))
-                new_context.run_on_start(lambda: res_sf.set_known_bool(False))
                 new_context.run_on_start(lambda: new_context.push(res_sf))
                 new_context.run_on_start(
-                    lambda: Check(res_sf.as_Int() == 0, err_invalid_arguments(),
+                    lambda: Check(res_sf.as_Int() == 0, err_branch_condition_invalid(),
                                   enforcement_condition=res_sf))
+                new_context.run_on_start(lambda: res_sf.set_known_bool(False, set_size=True))
 
-            res_sf.set_known_bool(True)
             Check(res_sf.as_Int() == 1, err_invalid_arguments(),
                   enforcement_condition=res_sf)
+            res_sf.set_known_bool(True, set_size=True)
 
             if isinstance(a, int) and isinstance(b, int):
                 r_i64 = a % b
@@ -7040,8 +7068,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                     OP_GREATERTHANOREQUAL64: lambda a, b: a >= b,
                 }
 
-            r.set_as_Int(If(op_table[op](vcha.use_as_Int64(),
-                                         vchb.use_as_Int64()),
+            r.set_as_Int(If(op_table[op](vcha.as_Int64(), vchb.as_Int64()),
                             1, 0))
 
             z3check()
@@ -7058,25 +7085,25 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
             r = symresult(op, vcha)
             r_sf = sym_successflag(op, vcha)
 
-            args_valid = vcha.as_Int64() != IntLE64.MIN_VALUE
+            args_invalid = vcha.as_Int64() == IntLE64.MIN_VALUE
 
-            r_sf.set_as_Int(If(args_valid, 1, 0))
+            r_sf.set_as_Int(If(args_invalid, 0, 1))
 
             if not should_skip_immediately_failed_branch():
                 new_context = ctx.branch(
                     cond=vcha,
                     cond_designations=('Success branch', 'Failure branch'))
-                new_context.run_on_start(lambda: r_sf.set_known_bool(False))
                 new_context.run_on_start(lambda: new_context.push(r_sf))
                 new_context.run_on_start(
-                    lambda: Check(r_sf.as_Int() == 0, err_invalid_arguments(),
+                    lambda: Check(r_sf.as_Int() == 0, err_branch_condition_invalid(),
                                   enforcement_condition=r_sf))
+                new_context.run_on_start(lambda: r_sf.set_known_bool(False, set_size=True))
 
-            r_sf.set_known_bool(True)
             Check(r_sf.as_Int() == 1, err_invalid_arguments(),
                   enforcement_condition=r_sf)
+            r_sf.set_known_bool(True, set_size=True)
 
-            r.set_as_Int64(-vcha.use_as_Int64())
+            r.set_as_Int64(-vcha.as_Int64())
 
             z3check()
 
@@ -7104,7 +7131,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
 
             r = symresult(op, bn)
 
-            value = bn.use_as_Int64()
+            value = bn.as_Int64()
 
             Check(And(value >= MIN_SCRIPTNUM_INT, value <= MAX_SCRIPTNUM_INT),
                   err_scriptnum_out_of_bounds())
@@ -7302,10 +7329,18 @@ def symex_script() -> None:  # noqa
                         ctx.pc, 'Maximum opcode count is reached')
                     break
 
+            num_pre_op_used_witnesses = len(ctx.used_witnesses)
+
             if symex_op(ctx, op_or_sd):
                 if varname := g_var_save_positions.get(ctx.pc):
                     if len(ctx.stack) > 0:
                         ctx.stack[-1].set_varname(varname)
+
+                num_new_witnesses = len(ctx.used_witnesses) - num_pre_op_used_witnesses
+                assert num_new_witnesses >= 0
+                if num_new_witnesses:
+                    for wit in ctx.used_witnesses[-num_new_witnesses:]:
+                        pre_op_state.stack.insert(0, wit)
 
                 ctx.exec_state_log[ctx.pc] = pre_op_state
 
@@ -7444,6 +7479,11 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
                 op = maybe_op
 
                 mode = 'elements' if env.is_elements else 'bitcoin'
+                if env.sigversion == SigVersion.TAPSCRIPT:
+                    mode = f'{mode} (tapscript)'
+                else:
+                    mode = f'{mode} (non-tapscript)'
+
                 if op not in env.get_enabled_opcodes():
                     die(f'opcode {op_str} is not valid for {mode}')
 
@@ -7504,8 +7544,7 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
 
     top: SymData | None = None
 
-    if not env.is_incomplete_script and \
-            (len(ctx.stack) == 1 or not env.cleanstack_flag):
+    if not env.is_incomplete_script:
         top = ctx.stacktop(-1)
 
         if top._wit_no is not None:
@@ -7547,7 +7586,7 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
                     'final depth bytesize is not within possible sizes that was set')
                 return
 
-        Check(sd.as_Int() == sd.depth)
+        Check(sd.use_as_Int() == sd.depth)
 
     mvdict_req: dict[str, tuple[str, SymDataRType]] = {}
     mvnamemap: dict[str, 'SymData'] = {}
@@ -7562,6 +7601,7 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
                 ("only witnesses are processed at this point, tx values"
                     "cannot intersect")
             txval.update_model_values_request_dict(mvdict_req, mvnamemap)
+            processed.append(txval)
 
         for val in g_data_identifiers.values():
             if val not in processed:
@@ -7590,8 +7630,8 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
 
         raise sf
 
-    if len(ctx.stack) == 0 and not env.is_incomplete_script:
-        raise ScriptFailure('Stack is empty on script end')
+    if not env.is_incomplete_script:
+        assert len(ctx.stack) > 0
 
     if len(ctx.stack) > 1:
         if not env.cleanstack_flag:
@@ -7664,6 +7704,7 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
                 ("only witnesses are processed at this point, tx values"
                     "cannot intersect")
             txval.check_only_one_value_possible()
+            processed.append(txval)
 
         for val in g_data_identifiers.values():
             if val in processed:
@@ -7978,11 +8019,7 @@ def report() -> None:  # noqa
 
             print(f"Witnesses used: {num_witnesses}")
             if env.produce_model_values or env.is_incomplete_script:
-                if len(mvals):
-                    print('Stack:')
-                else:
-                    print('Stack: <empty>')
-
+                print('Model values:')
                 for ws in mvals:
                     print(f'\t{ws}')
 
@@ -8603,7 +8640,7 @@ def sigint_handler(signo: int, frame: Any) -> None:
         sys.exit(-1)
 
 
-def chld_handler(_signum: int, _frame: Any) -> None:
+def sigchld_handler(_signum: int, _frame: Any) -> None:
     try:
         os.wait()
     except OSError:
@@ -8611,8 +8648,6 @@ def chld_handler(_signum: int, _frame: Any) -> None:
 
 
 def try_import_optional_modules() -> None:
-    global g_failure_code
-
     env = cur_env()
     if env.z3_enabled:
         if not g_optional_modules_register['z3']:
@@ -8623,11 +8658,7 @@ def try_import_optional_modules() -> None:
                 sys.stderr.write(f'ERROR: Failed to import z3: {e}\n')
                 sys.exit()
 
-            g_failure_code = Int('failure_code')
-
             g_optional_modules_register['z3'] = True
-    else:
-        g_failure_code = -1
 
     global g_secp256k1_handle
     global g_secp256k1_context
@@ -8834,7 +8865,7 @@ def main_cli() -> None:
             try_import_optional_modules()
             main()
     else:
-        signal.signal(signal.SIGCHLD, chld_handler)
+        signal.signal(signal.SIGCHLD, sigchld_handler)
         signal.signal(signal.SIGINT, signal.SIG_IGN)
         try:
             os.waitpid(pid, 0)
