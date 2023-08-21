@@ -40,7 +40,7 @@ Contains portions of the code that were originally released under MIT software
 license. These are code of the CSHA256 class (derived from MIT-licensed code,
 that was authored by various Bitcoin Core developers) and ripemd160 function
 (MIT-licensed code, authored by Pieter Wuille). Please refer to the source code
-in of bsst python module for more information on these.
+of bsst python module for more information on these.
 
 ## Thoroughness vs speed of analysis
 
@@ -232,7 +232,7 @@ without installing `bsst` python module.
         in the script, or the string "L<num>" where "<num>" is the line number
         in the text of the script
 
-  --produce-model-values=false
+  --produce-model-values=true
 
         Produce 'model values' for fields of transaction, witnesses, and
         the value(s) on the stack after execution has finished (if
@@ -245,12 +245,12 @@ without installing `bsst` python module.
         it will be shown with '=' between the name and the value in the report,
         otherwise the separator will be ':'.
 
-  --log-progress=false
+  --log-progress=true
 
         Print progress log as the script is analyzed.
         The progress log lines are sent to STDOUT
 
-  --log-solving-attempts=false
+  --log-solving-attempts=true
 
         In addition to progress log, log info about each solving attempt
 
@@ -405,10 +405,10 @@ without installing `bsst` python module.
   --do-progressive-z3-checks=true
 
         Perform Z3 check after each opcode is symbolically executed.
-        Will likely make analysis time for the whole script longer,
-        but might detect some failures faster. Also might give clearer reasons
-        for paricular failure when the failure is detected right after the
-        opcode rather than at the end of execution path
+        When true, analysis time for the whole script will likely be longer,
+        but might some failures might be detected faster. Also might give
+        clearer reasons for paricular failure when the failure is detected
+        right after the opcode rather than at the end of execution path
 
   --tag-data-with-position=false
 
@@ -469,7 +469,7 @@ without installing `bsst` python module.
 
         If true, `--minimaldata-flag` is implied to be true
 
-  --nulldummy-flag=true
+  --nulldummy-flag=false
 
         SCRIPT_VERIFY_NULLDUMMY
         If this flag is not set explicitly, it will be false with

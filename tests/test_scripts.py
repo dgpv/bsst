@@ -21,10 +21,12 @@ def CaptureStdout() -> Generator[StringIO, None, None]:
 
 @contextmanager
 def FreshEnv(*, z3_enabled: bool = False, is_tapscript: bool = False,
+             assume_no_160bit_hash_collisions: bool = False,
              ) -> Generator[bsst.SymEnvironment, None, None]:
     env = bsst.SymEnvironment()
     env.is_elements = True
     env.z3_enabled = z3_enabled
+    env.assume_no_160bit_hash_collisions = assume_no_160bit_hash_collisions
     if is_tapscript:
         env.sigversion = bsst.SigVersion.TAPSCRIPT
     else:
@@ -68,6 +70,7 @@ def process_contexts(env: bsst.SymEnvironment) -> None:
 
 def do_test_single(script: str, *,
                    z3_enabled: bool = False, is_tapscript: bool = False,
+                   assume_no_160bit_hash_collisions: bool = False,
                    num_failures: int | None = None,
                    num_successes: int | None = None,
                    ) -> list[str]:
@@ -75,7 +78,9 @@ def do_test_single(script: str, *,
     print(f'z3_enabled: {z3_enabled}')
     print()
 
-    with FreshEnv(z3_enabled=z3_enabled, is_tapscript=is_tapscript) as env:
+    with FreshEnv(z3_enabled=z3_enabled, is_tapscript=is_tapscript,
+                  assume_no_160bit_hash_collisions=assume_no_160bit_hash_collisions
+                  ) as env:
         (bsst.g_script_body,
          bsst.g_line_no_table,
          bsst.g_var_save_positions) = bsst.get_opcodes(script.split('\n'))
@@ -109,6 +114,67 @@ def do_test(script: str, *,
 
 
 def test() -> None:
+    out: str = ''
+
+    with CaptureStdout() as output:
+        do_test_single("DUP INSPECTINPUTOUTPOINT TOALTSTACK TOALTSTACK TOALTSTACK 1 INSPECTINPUTOUTPOINT ROT FROMALTSTACK EQUALVERIFY SWAP FROMALTSTACK EQUALVERIFY FROMALTSTACK EQUALVERIFY 1 EQUAL",
+                       z3_enabled=True, num_successes=1)
+        out = output.getvalue()
+
+    assert "<*> EQUAL(INPUT_1_OUTPOINT_HASH, INPUT_OUTPOINT_HASH(wit0))" in out
+    assert "<*> EQUAL(INPUT_1_OUTPOINT_PREVOUT_N, INPUT_OUTPOINT_PREVOUT_N(wit0))" in out
+    assert "<*> EQUAL(INPUT_1_OUTPOINT_FLAG, INPUT_OUTPOINT_FLAG(wit0))" in out
+
+    do_test_single("DUP INSPECTINPUTOUTPOINT TOALTSTACK TOALTSTACK TOALTSTACK 1 INSPECTINPUTOUTPOINT ROT FROMALTSTACK EQUAL NOT VERIFY SWAP FROMALTSTACK EQUALVERIFY FROMALTSTACK EQUALVERIFY 1 EQUAL",
+                   z3_enabled=True, num_successes=0, num_failures=2)
+    do_test_single("DUP INSPECTINPUTOUTPOINT TOALTSTACK TOALTSTACK TOALTSTACK 1 INSPECTINPUTOUTPOINT ROT FROMALTSTACK EQUALVERIFY SWAP FROMALTSTACK EQUAL NOT VERIFY FROMALTSTACK EQUALVERIFY 1 EQUAL",
+                   z3_enabled=True, num_successes=0, num_failures=2)
+    do_test_single("DUP INSPECTINPUTOUTPOINT TOALTSTACK TOALTSTACK TOALTSTACK 1 INSPECTINPUTOUTPOINT ROT FROMALTSTACK EQUALVERIFY SWAP FROMALTSTACK EQUALVERIFY FROMALTSTACK EQUAL NOT VERIFY 1 EQUAL",
+                   z3_enabled=True, num_successes=0, num_failures=2)
+
+    with CaptureStdout() as output:
+        do_test_single("DUP INSPECTINPUTASSET TOALTSTACK TOALTSTACK 1 INSPECTINPUTASSET SWAP FROMALTSTACK EQUALVERIFY FROMALTSTACK EQUALVERIFY 1 EQUAL",
+                       z3_enabled=True, num_successes=1)
+        out = output.getvalue()
+
+    assert "<*> EQUAL(INPUT_1_ASSET, INPUT_ASSET(wit0))" in out
+    assert "<*> EQUAL(INPUT_1_ASSET_PREFIX, INPUT_ASSET_PREFIX(wit0))" in out
+
+    do_test_single("DUP INSPECTINPUTASSET TOALTSTACK TOALTSTACK 1 INSPECTINPUTASSET SWAP FROMALTSTACK EQUAL NOT VERIFY FROMALTSTACK EQUALVERIFY 1 EQUAL",
+                   z3_enabled=True, num_successes=0, num_failures=2)
+    do_test_single("DUP INSPECTINPUTASSET TOALTSTACK TOALTSTACK 1 INSPECTINPUTASSET SWAP FROMALTSTACK EQUALVERIFY FROMALTSTACK EQUAL NOT VERIFY 1 EQUAL",
+                   z3_enabled=True, num_successes=0, num_failures=2)
+
+    with CaptureStdout() as output:
+        do_test_single("DUP INSPECTINPUTVALUE TOALTSTACK TOALTSTACK 1 INSPECTINPUTVALUE SWAP FROMALTSTACK EQUALVERIFY FROMALTSTACK EQUALVERIFY 1 EQUAL",
+                       z3_enabled=True, num_successes=1)
+        out = output.getvalue()
+
+    assert "<*> EQUAL(INPUT_1_VALUE, INPUT_VALUE(wit0))" in out
+    assert "<*> EQUAL(INPUT_1_VALUE_PREFIX, INPUT_VALUE_PREFIX(wit0))" in out
+
+    do_test_single("DUP INSPECTINPUTVALUE TOALTSTACK TOALTSTACK 1 INSPECTINPUTVALUE SWAP FROMALTSTACK EQUAL NOT VERIFY FROMALTSTACK EQUALVERIFY 1 EQUAL",
+                   z3_enabled=True, num_successes=0, num_failures=2)
+    do_test_single("DUP INSPECTINPUTVALUE TOALTSTACK TOALTSTACK 1 INSPECTINPUTVALUE SWAP FROMALTSTACK EQUALVERIFY FROMALTSTACK EQUAL NOT VERIFY 1 EQUAL",
+                   z3_enabled=True, num_successes=0, num_failures=2)
+
+    with CaptureStdout() as output:
+        do_test_single("DUP INSPECTINPUTSEQUENCE TOALTSTACK 1 INSPECTINPUTSEQUENCE FROMALTSTACK EQUALVERIFY 1 EQUAL",
+                       z3_enabled=True, num_successes=1)
+        out = output.getvalue()
+
+    assert "<*> EQUAL(INPUT_1_SEQUENCE, INPUT_SEQUENCE(wit0))" in out
+
+    do_test_single("DUP INSPECTINPUTSEQUENCE TOALTSTACK 1 INSPECTINPUTSEQUENCE FROMALTSTACK EQUAL NOT VERIFY 1 EQUAL",
+                   z3_enabled=True, num_successes=0, num_failures=2)
+
+    # explicit value 1 is ok for input
+    do_test("inspectinputvalue 1 equalverify le64(1) equal",
+            is_tapscript=True)
+    # explicit value 0 is not possible - no spendable 0-value outputs are
+    # allowed
+    do_test_single("inspectinputvalue 1 equalverify le64(0) equal",
+                   is_tapscript=True, z3_enabled=True, num_failures=1, num_successes=0)
 
     failures = do_test_single("0x304502203e4516da7253cf068effec6b95c41221c0cf3a8e6ccb8cbf1725b562e9afde2c022100ab1e3da73d67e32045a20e0b999e049978ea8d6ee5480d485fcf2ce0d03b2ef001 0x03d8bd1a69a1337d2817cfc0fecc3247436b34903d7ae424316354b73114dcb1dd CHECKSIG",
                               z3_enabled=False, num_successes=0, num_failures=1)
@@ -139,7 +205,7 @@ def test() -> None:
     do_test_single("DUP INSPECTOUTPUTVALUE 1 EQUALVERIFY le64(0) EQUALVERIFY INSPECTOUTPUTSCRIPTPUBKEY SWAP x('6a') SHA256 EQUALVERIFY 0 NUMEQUAL",
                    is_tapscript=True, z3_enabled=True, num_failures=1, num_successes=0)
 
-    out: str = ''
+    out = ''
     with CaptureStdout() as output:
         do_test_single("IF 2DUP EQUALVERIFY 1 EQUALVERIFY 1 EQUALVERIFY ELSE EQUALVERIFY ENDIF",
                        z3_enabled=True, num_successes=2)
@@ -253,9 +319,46 @@ def test() -> None:
     do_test("DUP x('99') AND SWAP x('23') EQUALVERIFY 1 EQUAL")
     do_test("DUP x('99') OR SWAP x('23') EQUALVERIFY x('bb') EQUAL")
     do_test("DUP x('5511FF99') OR SWAP x('22758399') EQUALVERIFY x('7775ff99') EQUAL")
+
+    # equal hashes means equal data for strong hases
     do_test("2DUP HASH256 SWAP HASH256 EQUALVERIFY EQUAL")
+    do_test("2DUP EQUALVERIFY HASH256 SWAP HASH256 EQUAL")
+    do_test("2DUP SHA256 SWAP SHA256 EQUALVERIFY EQUAL")
+    do_test("2DUP EQUALVERIFY SHA256 SWAP SHA256 EQUAL")
+    # non-equal hashes means equal data for strong hases
     do_test("2DUP HASH256 SWAP HASH256 EQUAL NOT VERIFY EQUAL NOT")
-    do_test("2DUP SHA1 SWAP SHA1 EQUAL NOT VERIFY EQUAL NOT")
+    do_test("2DUP EQUAL NOT VERIFY HASH256 SWAP HASH256 EQUAL NOT")
+    do_test("2DUP SHA256 SWAP SHA256 EQUAL NOT VERIFY EQUAL NOT")
+    do_test("2DUP EQUAL NOT VERIFY SHA256 SWAP SHA256 EQUAL NOT")
+
+    # non-equal hashes means non-equal data (only detectable with Z3)
+    do_test_single("2DUP HASH256 SWAP HASH256 EQUALVERIFY EQUAL NOT",
+                   z3_enabled=True, num_successes=0, num_failures=1)
+    do_test_single("2DUP EQUALVERIFY HASH256 SWAP HASH256 EQUAL NOT",
+                   z3_enabled=True, num_successes=0, num_failures=1)
+    do_test_single("2DUP SHA256 SWAP SHA256 EQUALVERIFY EQUAL NOT",
+                   z3_enabled=True, num_successes=0, num_failures=1)
+    do_test_single("2DUP EQUALVERIFY SHA256 SWAP SHA256 EQUAL NOT",
+                   z3_enabled=True, num_successes=0, num_failures=1)
+
+    # 160-bit hashes by default are not assumed to be collision-free
+    do_test_single("2DUP SHA1 SWAP SHA1 EQUALVERIFY EQUAL NOT",
+                   z3_enabled=True, num_successes=1, num_failures=0)
+    do_test_single("2DUP HASH160 SWAP HASH160 EQUALVERIFY EQUAL NOT",
+                   z3_enabled=True, num_successes=1, num_failures=0)
+    do_test_single("2DUP RIPEMD160 SWAP RIPEMD160 EQUALVERIFY EQUAL NOT",
+                   z3_enabled=True, num_successes=1, num_failures=0)
+
+    # but with assume_no_160bit_hash_collisions=true, these should fail
+    do_test_single("2DUP SHA1 SWAP SHA1 EQUALVERIFY EQUAL NOT",
+                   z3_enabled=True, num_successes=0, num_failures=1)
+    do_test_single("2DUP HASH160 SWAP HASH160 EQUALVERIFY EQUAL NOT",
+                   z3_enabled=True, num_successes=0, num_failures=1)
+    do_test_single("2DUP RIPEMD160 SWAP RIPEMD160 EQUALVERIFY EQUAL NOT",
+                   z3_enabled=True, num_successes=0, num_failures=1)
+
+    do_test("'a' SHA256INITIALIZE 'b' SHA256UPDATE 'c' SHA256FINALIZE DUP 'abc' SHA256 EQUALVERIFY 0xba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad equal",
+            is_tapscript=True)
     do_test("3DUP DUP 'AA' EQUALVERIFY SHA256INITIALIZE SIZE 42 EQUALVERIFY SWAP SHA256UPDATE SIZE 45 EQUALVERIFY SWAP SHA256FINALIZE TOALTSTACK DROP 'BBB' EQUALVERIFY 'CCCC' EQUALVERIFY DROP DROP FROMALTSTACK",
             is_tapscript=True)
     do_test("DUP x('00') SWAP CAT SWAP x('0080') EQUALVERIFY IFDUP x('000080') XOR 0 RSHIFT NOT",

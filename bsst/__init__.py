@@ -229,8 +229,9 @@ class SymEnvironment:
         otherwise the separator will be ':'.
         """
 
-        if not self._z3_enabled:
-            return False
+        if not self._is_for_usage_message:
+            if not self._z3_enabled:
+                return False
 
         return self._produce_model_values
 
@@ -243,8 +244,9 @@ class SymEnvironment:
         """Print progress log as the script is analyzed.
         The progress log lines are sent to STDOUT
         """
-        if not self._z3_enabled:
-            return False
+        if not self._is_for_usage_message:
+            if not self._z3_enabled:
+                return False
 
         return self._log_progress
 
@@ -256,6 +258,8 @@ class SymEnvironment:
     def log_solving_attempts(self) -> bool:
         """In addition to progress log, log info about each solving attempt
         """
+        if self._is_for_usage_message:
+            return self._log_solving_attempts
 
         if not self.log_progress:
             return False
@@ -286,8 +290,9 @@ class SymEnvironment:
         enforcement or for 'only one possible model value'. Automatically
         set to true if `z3_debug` is true
         """
-        if self._z3_debug:
-            return True
+        if not self._is_for_usage_message:
+            if self._z3_debug:
+                return True
 
         return self._all_z3_assertions_are_tracked_assertions
 
@@ -306,8 +311,9 @@ class SymEnvironment:
         'start method' of python multiprocessing module (that means that
         parallel solving is not supported on Windows or MacOS)
         """
-        if self._use_z3_incremental_mode:
-            return False
+        if not self._is_for_usage_message:
+            if self._use_z3_incremental_mode:
+                return False
 
         return self._use_parallel_solving
 
@@ -320,8 +326,9 @@ class SymEnvironment:
         """Number of solver processes to run in parallel. If zero, then
         number of available CPU will be used
         """
-        if self._use_z3_incremental_mode:
-            return 0
+        if not self._is_for_usage_message:
+            if self._use_z3_incremental_mode:
+                return 0
 
         return self._parallel_solving_num_processes
 
@@ -340,8 +347,9 @@ class SymEnvironment:
         When solver randomization is enabled (`disable_z3_randomization` is
         false), restarting solver can often help to find solution faster
         """
-        if self._use_z3_incremental_mode:
-            return 0
+        if not self._is_for_usage_message:
+            if self._use_z3_incremental_mode:
+                return 0
 
         return self._solver_timeout_seconds
 
@@ -602,13 +610,14 @@ class SymEnvironment:
     @property
     def do_progressive_z3_checks(self) -> bool:
         """Perform Z3 check after each opcode is symbolically executed.
-        Will likely make analysis time for the whole script longer,
-        but might detect some failures faster. Also might give clearer reasons
-        for paricular failure when the failure is detected right after the
-        opcode rather than at the end of execution path
+        When true, analysis time for the whole script will likely be longer,
+        but might some failures might be detected faster. Also might give
+        clearer reasons for paricular failure when the failure is detected
+        right after the opcode rather than at the end of execution path
         """
-        if self._use_z3_incremental_mode:
-            return False
+        if not self._is_for_usage_message:
+            if self._use_z3_incremental_mode:
+                return False
 
         return self._do_progressive_z3_checks
 
@@ -672,8 +681,9 @@ class SymEnvironment:
     def discourage_upgradeable_pubkey_type_flag(self) -> bool:
         """SCRIPT_VERIFY_DISCOURAGE_UPGRADEABLE_PUBKEY_TYPE
         """
-        if self._is_miner:
-            return False
+        if not self._is_for_usage_message:
+            if self._is_miner:
+                return False
 
         return self._discourage_upgradeable_pubkey_type_flag
 
@@ -685,8 +695,9 @@ class SymEnvironment:
     def strictenc_flag(self) -> bool:
         """SCRIPT_VERIFY_STRICTENC
         """
-        if self._is_miner:
-            return False
+        if not self._is_for_usage_message:
+            if self._is_miner:
+                return False
 
         return self._strictenc_flag
 
@@ -698,8 +709,9 @@ class SymEnvironment:
     def witness_pubkeytype_flag(self) -> bool:
         """SCRIPT_VERIFY_WITNESS_PUBKEYTYPE
         """
-        if self._is_miner:
-            return False
+        if not self._is_for_usage_message:
+            if self._is_miner:
+                return False
 
         return self._witness_pubkeytype_flag
 
@@ -711,16 +723,17 @@ class SymEnvironment:
     def minimalif_flag(self) -> bool:
         """SCRIPT_VERIFY_MINIMALIF
         """
-        if self._sigversion == SigVersion.TAPSCRIPT:
-            # MINIMALIF is a consensus rule under tapscript
-            return True
+        if not self._is_for_usage_message:
+            if self._sigversion == SigVersion.TAPSCRIPT:
+                # MINIMALIF is a consensus rule under tapscript
+                return True
 
-        if self._is_miner:
-            return False
+            if self._is_miner:
+                return False
 
-        if self._sigversion != SigVersion.WITNESS_V0:
-            # MINIMALIF is a policy rule segwit, but is not enabled for non-segwit
-            return False
+            if self._sigversion != SigVersion.WITNESS_V0:
+                # MINIMALIF is a policy rule segwit, but is not enabled for non-segwit
+                return False
 
         return self._minimalif_flag
 
@@ -735,11 +748,12 @@ class SymEnvironment:
         If `minimaldata_flag_strict` is false, immediate data values
         are not subjected to checks: `0x01 VERIFY` will not fail
         """
-        if self._is_miner:
-            return False
+        if not self._is_for_usage_message:
+            if self._is_miner:
+                return False
 
-        if self._minimaldata_flag_strict:
-            return True
+            if self._minimaldata_flag_strict:
+                return True
 
         return self._minimaldata_flag
 
@@ -756,8 +770,9 @@ class SymEnvironment:
 
         If true, `minimaldata_flag` is implied to be true
         """
-        if self._is_miner:
-            return False
+        if not self._is_for_usage_message:
+            if self._is_miner:
+                return False
 
         return self._minimaldata_flag_strict
 
@@ -771,9 +786,10 @@ class SymEnvironment:
         If this flag is not set explicitly, it will be false with
         `--sigversion=base`, and false otherwise
         """
-        if self._sigversion != SigVersion.BASE:
-            if self._nulldummy_flag is None:
-                return True
+        if not self._is_for_usage_message:
+            if self._sigversion != SigVersion.BASE:
+                if self._nulldummy_flag is None:
+                    return True
 
         return bool(self._nulldummy_flag)
 
@@ -785,8 +801,9 @@ class SymEnvironment:
     def low_s_flag(self) -> bool:
         """SCRIPT_VERIFY_LOW_S
         """
-        if self._is_miner:
-            return False
+        if not self._is_for_usage_message:
+            if self._is_miner:
+                return False
 
         return self._low_s_flag
 
@@ -798,8 +815,9 @@ class SymEnvironment:
     def nullfail_flag(self) -> bool:
         """SCRIPT_VERIFY_NULLFAIL
         """
-        if self._is_miner:
-            return False
+        if not self._is_for_usage_message:
+            if self._is_miner:
+                return False
 
         return self._nullfail_flag
 
@@ -812,8 +830,9 @@ class SymEnvironment:
         """SCRIPT_VERIFY_CLEANSTACK
         Will be false if `is_incomplete_script` is true
         """
-        if self._is_incomplete_script:
-            return False
+        if not self._is_for_usage_message:
+            if self._is_incomplete_script:
+                return False
 
         return self._cleanstack_flag
 
@@ -890,7 +909,8 @@ class SymEnvironment:
 
         self._op_plugins = set(value)
 
-    def __init__(self) -> None:
+    def __init__(self, *, is_for_usage_message: bool = False) -> None:
+        self._is_for_usage_message = is_for_usage_message
         self._input_file = '-'
         self._z3_enabled = False
         self._z3_debug = False
@@ -1057,22 +1077,19 @@ class SymEnvironment:
         self._z3_tracked_assertion_lines[lineno_str] = usageno+1
         return usageno
 
-    def get_sym_hashfun(self, op: 'OpCode') -> Optional['z3.FuncDeclRef']:
-
-        hashops = [OP_SHA256, OP_HASH256]
-        if self._assume_no_160bit_hash_collisions:
-            hashops.extend([OP_RIPEMD160, OP_SHA1, OP_HASH160])
-
-        if op not in hashops:
-            return None
-
+    def get_sym_hashfun(self, op: 'OpCode') -> tuple['z3.FuncDeclRef', bool]:
         symfun = self._sym_hashfun.get(op.name)
         if symfun is None:
             symfun = Function(f'{op.name}', IntSeqSortRef(), IntSeqSortRef())
 
             self._sym_hashfun[op.name] = symfun
 
-        return symfun
+        if self._assume_no_160bit_hash_collisions:
+            collision_possible = False
+        else:
+            collision_possible = op in (OP_RIPEMD160, OP_SHA1, OP_HASH160)
+
+        return symfun, collision_possible
 
     def get_sym_bitfun8(self, op: 'OpCode') -> 'z3.FuncDeclRef':
 
@@ -6039,15 +6056,18 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
             else:
                 r.set_possible_sizes(len(hf_table[op.name](b'')))
 
-            if r.is_static and env.z3_enabled:
-                sym_fun = env.get_sym_hashfun(op)
-                if sym_fun is not None:
-                    seq = FreshConst(IntSeqSortRef(), 'seq')
-                    data = vch.use_as_ByteSeq()
-                    r_data = r.use_as_ByteSeq()
-                    Check(sym_fun(data) == r_data)
-                    Check(z3.ForAll(seq, ((sym_fun(seq) == sym_fun(r_data))
-                                          == (seq == r_data))))
+            if env.z3_enabled:
+                sym_fun, collision_possible = env.get_sym_hashfun(op)
+                data = vch.use_as_ByteSeq()
+                r_data = r.use_as_ByteSeq()
+                Check(sym_fun(data) == r_data)
+                seq = FreshConst(IntSeqSortRef(), 'seq')
+                if collision_possible:
+                    Check(z3.ForAll(
+                        seq, Implies(seq == data, sym_fun(seq) == sym_fun(data))))
+                else:
+                    Check(z3.ForAll(
+                        seq, (sym_fun(seq) == sym_fun(data)) == (seq == data)))
 
             z3check()
 
@@ -6518,6 +6538,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                     outpoint_hash = SymData(name='INPUT_%_OUTPOINT_HASH',
                                             args=(bn,), possible_sizes=(32,))
                     outpoint_hash.use_as_ByteSeq()
+                    tx.input_outpoint_hash[index] = outpoint_hash
 
                 z3check()
 
@@ -8748,7 +8769,7 @@ def usage() -> None:
     print("  Default value for each setting is shown after the '=' sign")
     print()
 
-    dfl_env = SymEnvironment()
+    dfl_env = SymEnvironment(is_for_usage_message=True)
     for key, value in SymEnvironment.__dict__.items():
         if SymEnvironment.is_option(key):
             name = key.replace('_', '-')
