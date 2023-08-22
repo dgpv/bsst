@@ -245,6 +245,25 @@ without installing `bsst` python module.
         it will be shown with '=' between the name and the value in the report,
         otherwise the separator will be ':'.
 
+  --check-always-true-enforcements=true
+
+        Use Z3 to check enforcements for being 'always true': that is,
+        the enforcement condition being false means that no valid execution
+        paths exist in the script. Turning this setting off skips that
+        detection, which means that the analysis will finish faster.
+
+        When condition is detected as 'always true' it will be marked with
+        "<*>" in the report. Always-true conditions may indicate either an
+        issue with the script (like, doing `$data DUP EQUALVERIFY` instead of
+        `DUP $data EQUALVERIFY`), or an opportunity for optimization, if after
+        further analysis it is obvious that other conditions make this
+        'always true' enforcement unnecessary. Sometimes the enforcement is
+        'always true' only in particular execution path (see
+        `--mark-path-local-always-true-enforcements`).
+
+        Sometimes 'always true' condition for enforcements can also be detected
+        without use of Z3, this settings will not affect these cases.
+
   --log-progress=true
 
         Print progress log as the script is analyzed.

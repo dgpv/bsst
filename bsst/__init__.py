@@ -240,6 +240,36 @@ class SymEnvironment:
         self._produce_model_values = value
 
     @property
+    def check_always_true_enforcements(self) -> bool:
+        """Use Z3 to check enforcements for being 'always true': that is,
+        the enforcement condition being false means that no valid execution
+        paths exist in the script. Turning this setting off skips that
+        detection, which means that the analysis will finish faster.
+
+        When condition is detected as 'always true' it will be marked with
+        "<*>" in the report. Always-true conditions may indicate either an
+        issue with the script (like, doing `$data DUP EQUALVERIFY` instead of
+        `DUP $data EQUALVERIFY`), or an opportunity for optimization, if after
+        further analysis it is obvious that other conditions make this
+        'always true' enforcement unnecessary. Sometimes the enforcement is
+        'always true' only in particular execution path (see
+        `mark_path_local_always_true_enforcements`).
+
+        Sometimes 'always true' condition for enforcements can also be detected
+        without use of Z3, this settings will not affect these cases.
+        """
+
+        if not self._is_for_usage_message:
+            if not self._z3_enabled:
+                return False
+
+        return self._check_always_true_enforcements
+
+    @check_always_true_enforcements.setter
+    def check_always_true_enforcements(self, value: bool) -> None:
+        self._check_always_true_enforcements = value
+
+    @property
     def log_progress(self) -> bool:
         """Print progress log as the script is analyzed.
         The progress log lines are sent to STDOUT
@@ -939,6 +969,7 @@ class SymEnvironment:
         self._log_solving_attempts = True
         self._log_solving_attempts_to_stderr = False
         self._produce_model_values = True
+        self._check_always_true_enforcements = True
         self._exit_on_solver_result_unknown = True
         self._tag_data_with_position = False
         self._use_deterministic_arguments_order = True
@@ -7749,7 +7780,7 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
 
         z3_pop_context()
 
-    if verify_targets:
+    if env.check_always_true_enforcements and verify_targets:
         if env.log_progress:
             print()
             print_as_header('Checking for always-true enforcements',
