@@ -97,6 +97,9 @@ The reports show:
     - If constraint condition is always true, it will be marked with `<*>`
     - If constraint condition is always true in particular execution path, it will be marked with `{*}`
       (unless `--mark-path-local-always-true-enforcements` is set to `false`)
+    - If constraint condition is shown as `BOOL(<condition>)`, that means the condition is passed to `CastToBool()`:
+      empty data, arbitrary-length block of zero bytes, as well as arbitrary-length 'negative zero' (zero-bytes block
+      ended with byte 0x80) are seen as `false`, while any other value is seen as `true`
 
 * Model values: possible values for various variables such as witnesses, script result, or transaction fields
   (in Elements mode, where there are transaction introspection opcodes)

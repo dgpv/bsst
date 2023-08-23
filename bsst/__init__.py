@@ -2052,8 +2052,6 @@ def z3check(  # noqa
     model_values_to_retrieve: dict[str, tuple[str, SymDataRType]] | None = None
 ) -> Optional[dict[str, 'ConstrainedValue']]:
 
-    global g_check_op_start_time
-
     env = cur_env()
 
     if not env.z3_enabled:
@@ -2367,10 +2365,9 @@ def maybe_report_elapsed_time() -> None:
     env = cur_env()
 
     if env.log_solving_attempts:
-        if env.log_progress and env.do_progressive_z3_checks:
-            end = time.monotonic()
-            env.solving_log(f"... {end-g_check_op_start_time:.02f} seconds")
-            g_check_op_start_time = end
+        end = time.monotonic()
+        env.solving_log(f"... {end-g_check_op_start_time:.02f} seconds")
+        g_check_op_start_time = end
 
         if env.log_solving_attempts_to_stderr:
             env.solving_log("\n")
@@ -2804,9 +2801,10 @@ def CurrentOp(op_or_sd: Optional[Union['OpCode', 'ScriptData']]
 
     env = cur_env()
 
-    if env.do_progressive_z3_checks and env.log_solving_attempts:
+    if env.log_solving_attempts:
         g_check_op_start_time = time.monotonic()
-        if op_or_sd is None or isinstance(op_or_sd, OpCode):
+        if env.do_progressive_z3_checks and \
+                (op_or_sd is None or isinstance(op_or_sd, OpCode)):
             ctx = cur_context()
             assert (op is None) == (ctx.pc == len(g_script_body))
             if op is not None:
@@ -3425,41 +3423,47 @@ class Branchpoint:
 class Enforcement:
 
     def __init__(self, cond: 'SymData', *, pc: int, name: str = '',
+                 is_script_bool: bool = False,
                  context: 'ExecContext') -> None:
         self.context = context
         self.cond = cond
         self.pc = pc
         self.name = name
+        self.is_script_bool = is_script_bool
         self.is_always_true_in_path = False
         self.is_always_true_global = False
 
-    def _get_always_true_sign(self) -> str:
-        sign = ''
-        if self.is_always_true_global:
-            sign = f'{ALWAYS_TRUE_WARN_SIGN} '
-        elif (self.is_always_true_in_path and
-              cur_env().mark_path_local_always_true_enforcements):
-            sign = f'{LOCAL_ALWAYS_TRUE_SIGN} '
+    def _str_informative(self, is_canonical: bool = False) -> str:
+        # NOTE: when is_canonical=True, this should give
+        # 'canonical representation', so the 'informational decorations'
+        # for the returned text must be stable for each run of the program
+        with CurrentExecContext(self.context):
+            if is_canonical:
+                reprtext = self.cond.canonical_repr()
+            else:
+                reprtext = self.cond.readable_repr(with_name=self.name)
 
-        return sign
+            if self.is_script_bool:
+                reprtext = f'BOOL({reprtext})'
 
-    def _maybe_position_info_tag(self) -> str:
-        if not cur_env().tag_enforcements_with_position:
-            return ''
-        else:
-            return f' @ {op_pos_info(self.pc)}'
+            pos_info_tag = ''
+            if cur_env().tag_enforcements_with_position:
+                pos_info_tag = f' @ {op_pos_info(self.pc)}'
+
+            alwt_sign = ''
+            if self.is_always_true_global:
+                alwt_sign = f'{ALWAYS_TRUE_WARN_SIGN} '
+            elif (self.is_always_true_in_path and
+                  cur_env().mark_path_local_always_true_enforcements):
+                alwt_sign = f'{LOCAL_ALWAYS_TRUE_SIGN} '
+
+            return f'{alwt_sign}{reprtext}{pos_info_tag}'
 
     def __repr__(self) -> str:
-        with CurrentExecContext(self.context):
-            return (f'{self._get_always_true_sign()}'
-                    f'{self.cond.readable_repr(with_name=self.name)}'
-                    f'{self._maybe_position_info_tag()}')
+        return self._str_informative()
 
     def __str__(self) -> str:
-        with CurrentExecContext(self.context):
-            return (f'{self._get_always_true_sign()}'
-                    f'{self.cond.canonical_repr()}'
-                    f'{self._maybe_position_info_tag()}')
+        return self._str_informative(is_canonical=True)
 
     def __hash__(self) -> int:
         return hash(str(self))
@@ -4192,7 +4196,8 @@ class ExecContext(SupportsFailureCodeCallbacks):
         v.decrease_refcount()
         return v
 
-    def add_enforcement(self, cond: 'SymData', *, name: str = '') -> None:
+    def add_enforcement(self, cond: 'SymData', *, name: str = '',
+                        is_script_bool: bool = False) -> None:
         if self.skip_enforcement_in_region:
             start, end = self.skip_enforcement_in_region
             self.skip_enforcement_in_region = None
@@ -4201,7 +4206,8 @@ class ExecContext(SupportsFailureCodeCallbacks):
 
         cond.increase_refcount()
         self.enforcements.append(
-            Enforcement(cond, pc=self.pc, context=self, name=name))
+            Enforcement(cond, pc=self.pc, context=self, name=name,
+                        is_script_bool=is_script_bool))
 
     def get_name_suffix(self) -> str:
         return f'@{op_pos_info(self.pc, separator="")}'
@@ -5042,8 +5048,6 @@ def should_skip_immediately_failed_branch() -> bool:
 
 
 def symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:
-    global g_check_op_start_time
-
     try:
         with CurrentOp(op_or_sd):
             was_executed = _symex_op(ctx, op_or_sd)
@@ -5204,13 +5208,17 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
 
             le32_unsigned_to_integer(tx.nLockTime.as_ByteSeq(), nLockTime)
 
-            Check(Or(And(nLockTime < LOCKTIME_THRESHOLD,
-                         locktime < LOCKTIME_THRESHOLD),
-                     And(nLockTime >= LOCKTIME_THRESHOLD,
-                         locktime >= LOCKTIME_THRESHOLD)),
-                  err_locktime_type_mismatch())
+            no_locktime_type_mismatch = Or(And(nLockTime < LOCKTIME_THRESHOLD,
+                                               locktime < LOCKTIME_THRESHOLD),
+                                           And(nLockTime >= LOCKTIME_THRESHOLD,
+                                               locktime >= LOCKTIME_THRESHOLD))
 
-            Check(locktime <= nLockTime,
+            Check(no_locktime_type_mismatch, err_locktime_type_mismatch())
+
+            # Implication is added here because othersise "timelock_in_effect"
+            # error might not be shown by z3, and "locktime_type_mismatch"
+            # is shown where actually no mismatch
+            Check(Implies(no_locktime_type_mismatch, locktime <= nLockTime),
                   err_locktime_timelock_in_effect())
 
             Check(tx.nSequence.as_ref(tx.current_input_index.as_Int())
@@ -5365,7 +5373,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
 
             z3check()
 
-            ctx.add_enforcement(val)
+            ctx.add_enforcement(val, is_script_bool=True)
 
             popstack()
 
@@ -7579,8 +7587,6 @@ def finalize(ctx: ExecContext) -> None:  # noqa
 
 
 def _finalize(ctx: ExecContext) -> None:  # noqa
-    global g_check_op_start_time
-
     env = cur_env()
     assert not ctx.failure
     assert ctx.pc == len(g_script_body)
@@ -7812,7 +7818,7 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
         print()
 
     if top:
-        ctx.add_enforcement(top)
+        ctx.add_enforcement(top, is_script_bool=True)
 
 
 def varnames_show() -> None:
@@ -8858,7 +8864,7 @@ def parse_cmdline_args() -> None:  # noqa
             sys.exit()
 
         if not SymEnvironment.is_option(name):
-            sys.stderr.write("Unrecognized setting\n")
+            sys.stderr.write(f"Unrecognized setting \"--{argname}\"\n")
             sys.exit()
 
         cur_v = getattr(env, name)
@@ -8869,7 +8875,7 @@ def parse_cmdline_args() -> None:  # noqa
                 setattr(env, name, False)
             else:
                 sys.stderr.write(
-                    f"Setting --{argname} can be only 'true' or 'false'\n")
+                    f"Setting \"--{argname}\" can be only 'true' or 'false'\n")
                 sys.exit()
         elif isinstance(cur_v, set):
             try:
