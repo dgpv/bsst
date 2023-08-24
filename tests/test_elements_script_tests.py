@@ -3,6 +3,7 @@
 import re
 import sys
 import json
+import random
 from contextlib import contextmanager
 from typing import Generator, NoReturn
 
@@ -14,12 +15,18 @@ import bsst
 
 # pylama:ignore=E501,C901
 
+is_tapscript = False
+
 
 @contextmanager
 def FreshEnv(*, z3_enabled: bool = False
              ) -> Generator[bsst.SymEnvironment, None, None]:
     env = bsst.SymEnvironment()
-    env.sigversion = bsst.SigVersion.BASE
+    if is_tapscript:
+        env.sigversion = bsst.SigVersion.TAPSCRIPT
+    else:
+        env.sigversion = bsst.SigVersion.BASE
+
     env.is_elements = True
     env.z3_enabled = z3_enabled
     env.use_parallel_solving = False
@@ -52,7 +59,25 @@ def convert_script(line: str, flags: list[str],
         if not op_str:
             continue
 
-        if op_str.lower().startswith("0x"):
+        if is_tapscript and op_str.lower().startswith("le64("):
+            assert op_str.endswith(')')
+            op_str = op_str[5:-1]
+
+            sign = 1
+            if op_str.startswith('-'):
+                sign = -1
+                op_str = op_str[1:]
+
+            if not op_str.isdigit():
+                die('incorrect argument to le64()')
+
+            if op_str.startswith('0') and len(op_str) > 1:
+                die('no leading zeroes allowed')
+
+            v = int(op_str)*sign
+            script_bytes.append(b'\x08'+bytes(bsst.IntLE64.from_int(v)))
+
+        elif op_str.lower().startswith("0x"):
             data_str = op_str[2:]
             script_bytes.append(bytes.fromhex(data_str))
         elif (op_str.isdigit() or (op_str.startswith('-')
@@ -101,6 +126,11 @@ def convert_script(line: str, flags: list[str],
             script_lines.append(maybe_subst_with_nop(op_str, flags))
 
     return bsst.get_opcodes(script_lines)[0]
+
+
+supported_flags = {'DISCOURAGE_UPGRADEABLE_PUBKEY_TYPE', 'STRICTENC',
+                   'WITNESS_PUBKEYTYPE' 'MINIMALIF' 'MINIMALDATA' 'LOW_S',
+                   'NULLFAIL', 'CLEANSTACK', 'NULLDUMMY'}
 
 
 def common_env_settings(env: bsst.SymEnvironment, flags: list[str]) -> None:
@@ -158,7 +188,7 @@ def set_script_body(script_body: tuple[bsst.OpCode | bsst.ScriptData, ...]
     bsst.g_line_no_table.append(len(bsst.g_script_body))
 
 
-def process_testcases(
+def process_testcase_single(
     *,
     scriptPubKey: tuple[bsst.OpCode | bsst.ScriptData, ...],
     witness_data: list[bsst.ScriptData],
@@ -414,6 +444,16 @@ def process_testcases(
             assert scriptPubKey == (bsst.OP_CHECKSEQUENCEVERIFY,)
             assert any(f in ('top of stack is always False after script end',
                              'check_final_verify') for f in failures)
+        elif is_tapscript and expected_result == 'LE64_EXPECT8BYTES':
+            assert any((f.startswith('expected 8 bytes') or
+                        f == 'check_le64_wrong_size') for f in failures)
+        elif is_tapscript and expected_result == 'LE64_BOUNDS':
+            assert any(f in ('check_invalid_arguments', 'check_int64_out_of_bounds')
+                       for f in failures)
+        elif is_tapscript and expected_result == 'SCRIPTNUM_BOUNDS':
+            assert any(f == 'check_scriptnum_out_of_bounds' for f in failures)
+        elif is_tapscript and expected_result == 'INVALID_ARGUMENTS':
+            assert 'check_invalid_arguments' in failures
         else:
             assert expected_result in ('EVAL_FALSE', 'UNKNOWN_ERROR')
 
@@ -423,11 +463,113 @@ def die(msg: str) -> NoReturn:
     sys.exit(-1)
 
 
+def process_testcase(
+    *,
+    scriptSig: tuple[bsst.OpCode | bsst.ScriptData, ...] | None,
+    scriptPubKey: tuple[bsst.OpCode | bsst.ScriptData, ...],
+    flags: list[str],
+    comment: str,
+    expected_result: str,
+) -> None:
+
+    print(f"Process with flags {flags}")
+
+    clean_contexts()
+
+    if scriptSig:
+        set_script_body(scriptSig)
+        with FreshEnv() as env:
+            common_env_settings(env, flags)
+            env.is_incomplete_script = True
+
+            print("Sym-exec SSig")
+
+            bsst.g_is_in_processing = True
+            bsst.symex_script()
+            bsst.g_is_in_processing = False
+            bsst.report()
+            sys.stdout.flush()
+
+            process_contexts(env)
+
+            if len(valid_contexts) == 0:
+                if expected_result == 'UNKNOWN_ERROR':
+                    return
+
+                if expected_result == 'UNBALANCED_CONDITIONAL':
+                    assert any(f.startswith('unbalanced conditional')
+                               for f in failures)
+                    return
+
+            assert len(valid_contexts) > 0
+
+            if any(len(c.used_witnesses) > 0 for c in valid_contexts):
+                assert expected_result == 'INVALID_STACK_OPERATION'
+                assert all(len(c.used_witnesses) > 0
+                           for c in valid_contexts)
+                return
+
+    witness_data: list[bsst.ScriptData] = []
+
+    if valid_contexts:
+        assert len(valid_contexts) == 1
+        ctx = valid_contexts[0]
+        with bsst.CurrentExecContext(ctx):
+            for sd in ctx.stack:
+                mv = sd.get_model_value()
+                if mv is None:
+                    v = None
+                else:
+                    v = mv.single_value
+
+                if v is None:
+                    v = b'<arbitrary data>'
+                elif isinstance(v, str):
+                    v = v.encode('utf-8')
+                elif isinstance(v, bsst.IntLE64):
+                    v = bytes(v)
+
+                witness_data.append(
+                    bsst.ScriptData(name=None, value=v,
+                                    do_check_non_minimal='MINIMALDATA' in flags))
+
+    print("Sym-exec SPK")
+
+    print("NO Z3")
+    process_testcase_single(
+        scriptPubKey=scriptPubKey,
+        witness_data=witness_data,
+        comment=comment, flags=flags,
+        expected_result=expected_result,
+        z3_enabled=False)
+
+    print("WITH Z3")
+    process_testcase_single(
+            scriptPubKey=scriptPubKey,
+            witness_data=witness_data,
+            comment=comment, flags=flags,
+            expected_result=expected_result,
+            z3_enabled=True)
+
+    print("WITH Z3 and non-static witnesses")
+    process_testcase_single(
+            scriptPubKey=scriptPubKey,
+            witness_data=witness_data,
+            comment=comment, flags=flags,
+            expected_result=expected_result,
+            z3_enabled=True, use_nonstatic_witnesses=True)
+
+
 def test() -> None:
+    global is_tapscript
+
     if len(sys.argv) < 2:
         die('must specify path to script_tests.json and chain name\n')
 
     select_chain_params('elements')
+
+    if len(sys.argv) == 3 and sys.argv[2] == 'tapscript':
+        is_tapscript = True
 
     with open(sys.argv[1], 'r') as f:
         tc_no = 0
@@ -463,11 +605,11 @@ def test() -> None:
             if len(testcase) > 4:
                 comment = testcase[4]
 
-            # print("SSig", scriptSig)
-            # print("SPK", scriptPubKey)
-            # print("FLAGS", flags)
-            # print("ERes", expected_result)
-            # print()
+            print("SSig", scriptSig)
+            print("SPK", scriptPubKey)
+            print("FLAGS", flags)
+            print("ERes", expected_result)
+            print()
 
             if expected_result in ('SCRIPT_SIZE', 'SIG_PUSHONLY'):
                 # we do not model these
@@ -478,86 +620,30 @@ def test() -> None:
                             comment):
                     continue
 
-            clean_contexts()
+            process_testcase(
+                scriptSig=scriptSig, scriptPubKey=scriptPubKey,
+                flags=flags, comment=comment, expected_result=expected_result)
 
-            if scriptSig:
-                set_script_body(scriptSig)
-                with FreshEnv() as env:
-                    common_env_settings(env, flags)
-                    env.is_incomplete_script = True
-
-                    bsst.g_is_in_processing = True
-                    bsst.symex_script()
-                    bsst.g_is_in_processing = False
-                    bsst.report()
-                    sys.stdout.flush()
-
-                    process_contexts(env)
-
-                    if len(valid_contexts) == 0:
-                        if expected_result == 'UNKNOWN_ERROR':
-                            continue
-
-                        if expected_result == 'UNBALANCED_CONDITIONAL':
-                            assert any(f.startswith('unbalanced conditional')
-                                       for f in failures)
-                            continue
-
-                    assert len(valid_contexts) > 0
-
-                    if any(len(c.used_witnesses) > 0 for c in valid_contexts):
-                        assert expected_result == 'INVALID_STACK_OPERATION'
-                        assert all(len(c.used_witnesses) > 0
-                                   for c in valid_contexts)
-                        continue
-
-            witness_data: list[bsst.ScriptData] = []
-
-            if valid_contexts:
-                assert len(valid_contexts) == 1
-                ctx = valid_contexts[0]
-                with bsst.CurrentExecContext(ctx):
-                    for sd in ctx.stack:
-                        mv = sd.get_model_value()
-                        if mv is None:
-                            v = None
-                        else:
-                            v = mv.single_value
-
-                        if v is None:
-                            v = b'<arbitrary data>'
-                        elif isinstance(v, str):
-                            v = v.encode('utf-8')
-                        elif isinstance(v, bsst.IntLE64):
-                            v = bytes(v)
-
-                        witness_data.append(
-                            bsst.ScriptData(name=None, value=v,
-                                            do_check_non_minimal='MINIMALDATA' in flags))
-
-            print("NO Z3")
-            process_testcases(
-                scriptPubKey=scriptPubKey,
-                witness_data=witness_data,
-                comment=comment, flags=flags,
-                expected_result=expected_result,
-                z3_enabled=False)
-
-            print("WITH Z3")
-            process_testcases(
-                 scriptPubKey=scriptPubKey,
-                 witness_data=witness_data,
-                 comment=comment, flags=flags,
-                 expected_result=expected_result,
-                 z3_enabled=True)
-
-            print("WITH Z3 and non-static witnesses")
-            process_testcases(
-                 scriptPubKey=scriptPubKey,
-                 witness_data=witness_data,
-                 comment=comment, flags=flags,
-                 expected_result=expected_result,
-                 z3_enabled=True, use_nonstatic_witnesses=True)
+            if expected_result == 'OK':
+                random.shuffle(flags)
+                # check that removing flags does not change the result
+                flags.pop()
+                while(flags):
+                    process_testcase(
+                        scriptSig=scriptSig, scriptPubKey=scriptPubKey,
+                        flags=flags, comment=comment,
+                        expected_result=expected_result)
+                    flags.pop()
+            else:
+                # check that adding flags does not change the result
+                flags_to_add = list(supported_flags - set(flags))
+                random.shuffle(flags_to_add)
+                while(flags_to_add):
+                    process_testcase(
+                        scriptSig=scriptSig, scriptPubKey=scriptPubKey,
+                        flags=flags+list(flags_to_add), comment=comment,
+                        expected_result=expected_result)
+                    flags_to_add.pop()
 
 
 if __name__ == '__main__':

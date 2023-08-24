@@ -120,6 +120,15 @@ def do_test(script: str, *,
 def test() -> None:
     out: str = ''
 
+    res = "032c0158d0f6df4881e99e65fbea21f27321d817f79ad39e08eaf4f16f1419bb0c"
+    scalar = "e0f47c124f228b97bbdc0e4398aac9788869b9fbbc193d5323fdad9570609de6"
+    secp256k1_g = "0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+    # xpub = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+
+    #TODO: more ECMULSCALARVERIFY, TWEAKVERIFY TESTS
+    do_test(f"0x{res} 0x{secp256k1_g} 0x{scalar} ECMULSCALARVERIFY",
+            is_tapscript=True)
+
     do_test("TXWEIGHT 4000000 EQUAL", is_tapscript=True)
     failures = do_test_single("TXWEIGHT 4000001 EQUAL",
                               is_tapscript=True, z3_enabled=True, num_successes=0,

@@ -89,8 +89,10 @@ OR CONDITION, AND THE CONTRIBUTOR WON'T BE LIABLE TO ANYONE FOR ANY DAMAGES
 RELATED TO THIS SOFTWARE OR THIS LICENSE, UNDER ANY KIND OF LEGAL CLAIM.
 """
 
-# TODO: model all relevant script flags and make `env.is_miner` a setting
-# that turns on/off these individual flags
+# NOTE: while types for z3 are give, because at the time of writing the
+# z3 python module did not have typing, effectively all z3 types are 'Any'.
+# But when eventually z3 module would become typed, we then can check and
+# any problems that could be then detected
 
 # pylama:ignore=E501,E272
 
@@ -990,6 +992,7 @@ class SymEnvironment:
         self._max_num_outputs = self._max_tx_size // (9+1+33+33)
         self._op_plugins = set()
 
+        self._sym_ec_functions: dict[str, 'z3.Function'] = {}
         self._sym_hashfun: dict[str, 'z3.FuncDeclRef'] = {}
         self._sym_bitfun8: dict[str, 'z3.FuncDeclRef'] = {}
         self._z3_tracked_assertion_lines: dict[str, int] = {}
@@ -1107,6 +1110,14 @@ class SymEnvironment:
         usageno = self._z3_tracked_assertion_lines.get(lineno_str, 0)
         self._z3_tracked_assertion_lines[lineno_str] = usageno+1
         return usageno
+
+    def get_sym_ec_fun(self, name: str) -> 'z3.FuncDeclRef':
+        f = self._sym_ec_functions.get(name)
+        if f is None:
+            f = Function(f'ec_{name}', IntSeqSortRef(), IntSeqSortRef(), IntSeqSortRef())
+            self._sym_ec_functions[name] = f
+
+        return f
 
     def get_sym_hashfun(self, op: 'OpCode') -> tuple['z3.FuncDeclRef', bool]:
         symfun = self._sym_hashfun.get(op.name)
@@ -2371,14 +2382,6 @@ def maybe_report_elapsed_time() -> None:
 
         if env.log_solving_attempts_to_stderr:
             env.solving_log("\n")
-
-
-def get_sym_ec_mul() -> 'z3.FuncDeclRef':
-    return Function('ec_mul', IntSeqSortRef(), IntSeqSortRef(), IntSeqSortRef())
-
-
-def get_sym_ec_add() -> 'z3.FuncDeclRef':
-    return Function('ec_add', IntSeqSortRef(), IntSeqSortRef(), IntSeqSortRef())
 
 
 def get_sym_secp256k1_generator() -> 'z3.SeqSortRef':
@@ -7255,7 +7258,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                 Check(Implies(Not(Or(b_res[0] == 2, b_res[0] == 3)),
                               r.as_Int() == 0))
 
-            Check(b_res == get_sym_ec_mul()(b_gen, b_scalar),
+            Check(b_res == env.get_sym_ec_fun('mul')(b_gen, b_scalar),
                   err_ec_mul_known_arg_different_result())
 
             Check(r.as_Int() != 0, err_ecmultverify(),
@@ -7298,10 +7301,10 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
             Check(vchTweak.Length() == 32, err_invalid_scalar_length())
 
             Check(vchTweak.as_ByteSeq()
-                  == get_sym_ec_add()(vchInternalKey.as_ByteSeq(),
-                                      get_sym_ec_mul()(
-                                          get_sym_secp256k1_generator(),
-                                          vchTweak.as_ByteSeq())),
+                  == env.get_sym_ec_fun('add')(vchInternalKey.as_ByteSeq(),
+                                               env.get_sym_ec_fun('mul')(
+                                                   get_sym_secp256k1_generator(),
+                                                   vchTweak.as_ByteSeq())),
                   err_ec_add_known_arg_different_result())
 
             Check(r.as_Int() != 0, err_tweakverify(),
@@ -7471,14 +7474,14 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
                   op_str.lower().startswith('le64(') and op_str.endswith(')')):
 
                 op_str = op_str[5:-1]
-                if not (op_str.isdigit() or (op_str.startswith('-')
-                                             and op_str.isdigit())):
-                    die('incorrect argument to le64()')
 
                 sign = 1
                 if op_str.startswith('-'):
                     sign = -1
                     op_str = op_str[1:]
+
+                if not op_str.isdigit():
+                    die('incorrect argument to le64()')
 
                 if op_str.startswith('0') and len(op_str) > 1:
                     die('no leading zeroes allowed')
@@ -8176,7 +8179,12 @@ def report() -> None:  # noqa
 
             for pc in sorted(pc_list):
                 if pc in ctx.exec_state_log:
-                    print(f"POI @ {op_pos_info(pc)} ({g_script_body[pc]}):")
+                    if pc < len(g_script_body):
+                        op_str = f' ({g_script_body[pc]})'
+                    else:
+                        op_str = ''
+
+                    print(f"POI @ {op_pos_info(pc)}{op_str}:")
                     print(f"{ctx.exec_state_log[pc]}")
                     print("----")
 
