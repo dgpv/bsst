@@ -129,7 +129,7 @@ def convert_script(line: str, flags: list[str],
 
 
 supported_flags = {'DISCOURAGE_UPGRADEABLE_PUBKEY_TYPE', 'STRICTENC',
-                   'WITNESS_PUBKEYTYPE' 'MINIMALIF' 'MINIMALDATA' 'LOW_S',
+                   'WITNESS_PUBKEYTYPE', 'MINIMALIF', 'MINIMALDATA', 'LOW_S',
                    'NULLFAIL', 'CLEANSTACK', 'NULLDUMMY'}
 
 
@@ -196,7 +196,8 @@ def process_testcase_single(
     comment: str,
     expected_result: str,
     z3_enabled: bool,
-    use_nonstatic_witnesses: bool = False
+    use_nonstatic_witnesses: bool = False,
+    flags_were_altered: bool = False
 ) -> None:
     set_script_body(scriptPubKey)
 
@@ -221,7 +222,8 @@ def process_testcase_single(
         root_bp = env.get_root_branch()
 
         for i, wd in enumerate(witness_data):
-            if env.minimaldata_flag_strict and wd.is_non_minimal:
+            if env.minimaldata_flag_strict and wd.is_non_minimal and \
+                    not flags_were_altered:
                 assert expected_result in ('MINIMALDATA', 'UNKNOWN_ERROR')
                 return
 
@@ -272,11 +274,12 @@ def process_testcase_single(
         if expected_result == 'OK':
             if comment.startswith('2-of-2 CHECKMULTISIG NOT with '
                                   'the second pubkey invalid'):
-                assert len(valid_contexts) == 0, (
-                    'This testcase cannot be correctly sym-executed, '
-                    'because we cannot check if the signature is correct '
-                    'because we do not simulate transaction hash'
-                )
+                if 'STRICTENC' in flags:
+                    assert len(valid_contexts) == 0, (
+                        'This testcase cannot be correctly sym-executed, '
+                        'because we cannot check if the signature is correct '
+                        'because we do not simulate transaction hash'
+                    )
                 return
 
             if comment == 'P2SH with CLEANSTACK':
@@ -470,6 +473,8 @@ def process_testcase(
     flags: list[str],
     comment: str,
     expected_result: str,
+    flags_were_altered: bool = False,
+    z3_only: bool = False
 ) -> None:
 
     print(f"Process with flags {flags}")
@@ -535,13 +540,14 @@ def process_testcase(
 
     print("Sym-exec SPK")
 
-    print("NO Z3")
-    process_testcase_single(
-        scriptPubKey=scriptPubKey,
-        witness_data=witness_data,
-        comment=comment, flags=flags,
-        expected_result=expected_result,
-        z3_enabled=False)
+    if not z3_only:
+        print("NO Z3")
+        process_testcase_single(
+            scriptPubKey=scriptPubKey,
+            witness_data=witness_data,
+            comment=comment, flags=flags,
+            expected_result=expected_result,
+            z3_enabled=False, flags_were_altered=flags_were_altered)
 
     print("WITH Z3")
     process_testcase_single(
@@ -549,7 +555,7 @@ def process_testcase(
             witness_data=witness_data,
             comment=comment, flags=flags,
             expected_result=expected_result,
-            z3_enabled=True)
+            z3_enabled=True, flags_were_altered=flags_were_altered)
 
     print("WITH Z3 and non-static witnesses")
     process_testcase_single(
@@ -557,7 +563,8 @@ def process_testcase(
             witness_data=witness_data,
             comment=comment, flags=flags,
             expected_result=expected_result,
-            z3_enabled=True, use_nonstatic_witnesses=True)
+            z3_enabled=True, use_nonstatic_witnesses=True,
+            flags_were_altered=flags_were_altered)
 
 
 def test() -> None:
@@ -620,20 +627,26 @@ def test() -> None:
                             comment):
                     continue
 
+            z3_only = False
+            if 'Z3' in flags:
+                z3_only = True
+                flags.remove('Z3')
+
             process_testcase(
                 scriptSig=scriptSig, scriptPubKey=scriptPubKey,
-                flags=flags, comment=comment, expected_result=expected_result)
+                flags=flags, comment=comment, expected_result=expected_result,
+                z3_only=z3_only)
 
             if expected_result == 'OK':
                 random.shuffle(flags)
                 # check that removing flags does not change the result
-                flags.pop()
                 while(flags):
+                    flags.pop()
                     process_testcase(
                         scriptSig=scriptSig, scriptPubKey=scriptPubKey,
                         flags=flags, comment=comment,
-                        expected_result=expected_result)
-                    flags.pop()
+                        expected_result=expected_result,
+                        flags_were_altered=True, z3_only=z3_only)
             else:
                 # check that adding flags does not change the result
                 flags_to_add = list(supported_flags - set(flags))
@@ -642,7 +655,8 @@ def test() -> None:
                     process_testcase(
                         scriptSig=scriptSig, scriptPubKey=scriptPubKey,
                         flags=flags+list(flags_to_add), comment=comment,
-                        expected_result=expected_result)
+                        expected_result=expected_result,
+                        flags_were_altered=True, z3_only=z3_only)
                     flags_to_add.pop()
 
 

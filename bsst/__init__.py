@@ -992,7 +992,8 @@ class SymEnvironment:
         self._max_num_outputs = self._max_tx_size // (9+1+33+33)
         self._op_plugins = set()
 
-        self._sym_ec_functions: dict[str, 'z3.Function'] = {}
+        self._sym_ec_mul_scalar_fun: Optional['z3.Function'] = None
+        self._sym_ec_tweak_add_fun: Optional['z3.Function'] = None
         self._sym_hashfun: dict[str, 'z3.FuncDeclRef'] = {}
         self._sym_bitfun8: dict[str, 'z3.FuncDeclRef'] = {}
         self._z3_tracked_assertion_lines: dict[str, int] = {}
@@ -1111,11 +1112,19 @@ class SymEnvironment:
         self._z3_tracked_assertion_lines[lineno_str] = usageno+1
         return usageno
 
-    def get_sym_ec_fun(self, name: str) -> 'z3.FuncDeclRef':
-        f = self._sym_ec_functions.get(name)
+    def get_sym_ec_mul_scalar_fun(self) -> 'z3.FuncDeclRef':
+        f = self._sym_ec_mul_scalar_fun
         if f is None:
-            f = Function(f'ec_{name}', IntSeqSortRef(), IntSeqSortRef(), IntSeqSortRef())
-            self._sym_ec_functions[name] = f
+            f = Function('ec_mul_scalar', IntSeqSortRef(), IntSeqSortRef(), IntSeqSortRef())
+            self._sym_ec_mul_scalar_fun = f
+
+        return f
+
+    def get_sym_ec_tweak_add_fun(self) -> 'z3.FuncDeclRef':
+        f = self._sym_ec_tweak_add_fun
+        if f is None:
+            f = Function('ec_tweak_add', IntSeqSortRef(), IntSeqSortRef(), IntSeqSortRef())
+            self._sym_ec_tweak_add_fun = f
 
         return f
 
@@ -1559,8 +1568,8 @@ err_sha256_context_too_short = failcode('sha256_context_too_short')
 err_sha256_context_too_long = failcode('sha256_context_too_long')
 err_invalid_sha256_context = failcode('invalid_sha256_context')
 err_int64_out_of_bounds = failcode('int64_out_of_bounds')
-err_ec_mul_known_arg_different_result = failcode('ec_mul_known_arg_different_result')
-err_ec_add_known_arg_different_result = failcode('ec_add_known_arg_different_result')
+err_ec_known_args_different_result = failcode('ec_known_args_different_result')
+err_ec_known_result_different_args = failcode('ec_known_result_different_args')
 
 
 class SymDataRType(enum.Enum):
@@ -4841,10 +4850,19 @@ class SymData:
 
     def as_ByteSeq(self) -> Union[bytes, 'z3.SeqSortRef']:
         if self.is_static:
-            return IntSeqVal(self.as_bytes())
+            if cur_env().z3_enabled:
+                return IntSeqVal(self.as_bytes())
 
-        if not cur_env().z3_enabled and self.known_bool_value is not None:
-            return b'\x01' if self.known_bool_value else b''
+            return self.as_bytes()
+
+        if not cur_env().z3_enabled and self.known_bool_value is not None and \
+                self.possible_sizes in ((1,), (0,)):
+            if self.known_bool_value:
+                assert self.possible_sizes == (1,)
+                return b'\x01'
+            else:
+                assert self.possible_sizes == (0,)
+                return b''
 
         if self._ByteSeq is None:
             self._ByteSeq = Const(self._name_ByteSeq, IntSeqSortRef())
@@ -7258,8 +7276,18 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                 Check(Implies(Not(Or(b_res[0] == 2, b_res[0] == 3)),
                               r.as_Int() == 0))
 
-            Check(b_res == env.get_sym_ec_fun('mul')(b_gen, b_scalar),
-                  err_ec_mul_known_arg_different_result())
+            ec_mul_scalar = env.get_sym_ec_mul_scalar_fun()
+            Check(b_res == ec_mul_scalar(b_gen, b_scalar),
+                  err_ec_known_args_different_result())
+
+            if env.z3_enabled:
+                seq_a = FreshConst(IntSeqSortRef(), 'seq_a')
+                seq_b = FreshConst(IntSeqSortRef(), 'seq_b')
+                Check(z3.ForAll(
+                    [seq_a, seq_b],
+                    Implies(b_res == ec_mul_scalar(seq_a, seq_b),
+                            And(seq_a == b_gen, seq_b == b_scalar))),
+                    err_ec_known_result_different_args())
 
             Check(r.as_Int() != 0, err_ecmultverify(),
                   enforcement_condition=r)
@@ -7279,9 +7307,9 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
             vchTweak = stacktop(-2)
             vchInternalKey = stacktop(-1)
 
-            b_twkey = vchTweakedKey.use_as_ByteSeq()
-            vchTweak.use_as_ByteSeq()
-            vchInternalKey.use_as_ByteSeq()
+            b_tw_key = vchTweakedKey.use_as_ByteSeq()
+            b_tweak = vchTweak.use_as_ByteSeq()
+            b_int_key = vchInternalKey.use_as_ByteSeq()
 
             r = SymData(name=op.name,
                         args=(vchTweakedKey, vchTweak, vchInternalKey))
@@ -7289,7 +7317,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
             r.set_possible_values(0, 1)
 
             Check(vchTweakedKey.Length() == 33, err_invalid_pubkey_length())
-            Check(Or(b_twkey[0] == 2, b_twkey[0] == 3), err_invalid_pubkey())
+            Check(Or(b_tw_key[0] == 2, b_tw_key[0] == 3), err_invalid_pubkey())
 
             if vchTweakedKey.is_static:
                 if not is_static_pubkey_valid(vchTweakedKey.as_bytes()):
@@ -7300,12 +7328,19 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
 
             Check(vchTweak.Length() == 32, err_invalid_scalar_length())
 
-            Check(vchTweak.as_ByteSeq()
-                  == env.get_sym_ec_fun('add')(vchInternalKey.as_ByteSeq(),
-                                               env.get_sym_ec_fun('mul')(
-                                                   get_sym_secp256k1_generator(),
-                                                   vchTweak.as_ByteSeq())),
-                  err_ec_add_known_arg_different_result())
+            ec_tweak_add = env.get_sym_ec_tweak_add_fun()
+
+            Check(b_tw_key == ec_tweak_add(b_int_key, b_tweak),
+                  err_ec_known_args_different_result())
+
+            if env.z3_enabled:
+                seq_a = FreshConst(IntSeqSortRef(), 'seq_a')
+                seq_b = FreshConst(IntSeqSortRef(), 'seq_b')
+                Check(z3.ForAll(
+                    [seq_a, seq_b],
+                    Implies(b_tw_key == ec_tweak_add(seq_a, seq_b),
+                            And(seq_a == b_int_key, seq_b == b_tweak))),
+                    err_ec_known_result_different_args())
 
             Check(r.as_Int() != 0, err_tweakverify(),
                   enforcement_condition=r)
