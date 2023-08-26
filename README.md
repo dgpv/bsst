@@ -3,8 +3,6 @@
 
 Copyright (c) 2023 Dmitry Petukhov (https://github.com/dgpv), dp@bsst.dev
 
-NOTE: this is work-in-progress: Automatic tests are not yet added
-
 Symbolically executes the opcodes, checks constraints that opcodes impose on
 values they process, and shows the report with conditions that the script
 enforce, possible failures, etc.
