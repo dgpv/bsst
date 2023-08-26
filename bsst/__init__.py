@@ -3445,6 +3445,10 @@ class Enforcement:
         self.is_always_true_in_path = False
         self.is_always_true_global = False
 
+    def clone(self, *, context: 'ExecContext') -> 'Enforcement':
+        return Enforcement(self.cond, pc=self.pc, context=context,
+                           name=self.name, is_script_bool=self.is_script_bool)
+
     def _str_informative(self, is_canonical: bool = False) -> str:
         # NOTE: when is_canonical=True, this should give
         # 'canonical representation', so the 'informational decorations'
@@ -4062,9 +4066,7 @@ class ExecContext(SupportsFailureCodeCallbacks):
         inst.unused_values = self.unused_values.copy()
 
         for e in self.enforcements:
-            inst.enforcements.append(
-                Enforcement(e.cond, pc=e.pc, context=inst,
-                            name=e.name))
+            inst.enforcements.append(e.clone(context=inst))
 
         return inst
 
@@ -4515,6 +4517,7 @@ class SymData:
                 entry = g_varnames_table.get(cr, {})
                 entry[vn] = (self, cur_context())
                 g_varnames_table[cr] = entry
+                varname = vn
 
         return varname
 
@@ -5031,6 +5034,7 @@ class SymDepth(SymData):
     def __repr__(self) -> str:
         if vn := self._maybe_varname():
             return vn
+
         if cur_context().is_finalized:
             result_str = f'{self._name}:{self.depth}'
         else:
@@ -7870,8 +7874,14 @@ def varnames_show() -> None:
 
         for _, vndict in vn_copy.items():
             varnames: list[str] = []
+            prev_cr: str | None = None
             for vn, (value, ctx) in vndict.items():
                 g_seen_varnames.add(vn)
+                if prev_cr is None:
+                    prev_cr = value.canonical_repr()
+                else:
+                    assert prev_cr == value.canonical_repr()
+
                 varnames.append(vn)
                 g_seen_named_values.add(value.unique_name)
 

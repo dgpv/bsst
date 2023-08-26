@@ -50,10 +50,20 @@ Enforced constraints per path:
 All valid paths:
 ----------------
 
+        BOOL(b) @ 4:L6
+        BOOL(x) @ 8:L10
+
+IF wit0 @ 9:L11 : True
+----------------------
+
+        BOOL(b) @ 4:L6
+        BOOL(x) @ 8:L10
+
+IF wit0 @ 9:L11 : False
+-----------------------
+
         b @ 4:L6
         x @ 8:L10
-        b @ 20:L22
-        1 @ END
 
 Where:
 ------
@@ -84,10 +94,10 @@ Enforced constraints per path:
 All valid paths:
 ----------------
 
-        <*> b @ 4:L6
-        <*> x @ 8:L10
-        b @ 20:L22
-        1 @ END
+        <*> BOOL(b) @ 4:L6
+        <*> BOOL(x) @ 8:L10
+        BOOL(b) @ 20:L22
+        BOOL(1) @ END
 
 Where:
 ------

@@ -10,3 +10,5 @@ if [ ! -e script_tests.json ]; then
 fi
 ./test_elements_script_tests.py ./script_tests.json
 ./test_scripts.py
+
+echo "SUCCESS"
