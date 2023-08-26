@@ -204,6 +204,10 @@ without installing `bsst` python module.
 
         Show the software license this program is released under
 
+  --version
+
+        Show version
+
 ## Available settings:
 
   Default value for each setting is shown after the '=' sign

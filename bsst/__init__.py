@@ -1086,16 +1086,16 @@ class SymEnvironment:
                 spec = importlib.util.spec_from_file_location(module_name, ppath)
                 if spec is None:
                     sys.stderr.write(f'cannot load plugin \'{ppath}\': spec_from_file_location failed')
-                    sys.exit()
+                    sys.exit(-1)
 
                 if spec.loader is None:
                     sys.stderr.write(f'cannot load plugin \'{ppath}\': spec.loader is None')
-                    sys.exit()
+                    sys.exit(-1)
 
                 plugin_module = importlib.util.module_from_spec(spec)
                 if plugin_module is None:
                     sys.stderr.write(f'cannot load plugin \'{ppath}\': module_from_spec failed')
-                    sys.exit()
+                    sys.exit(-1)
 
                 sys.modules[module_name] = plugin_module
                 spec.loader.exec_module(plugin_module)
@@ -8757,7 +8757,7 @@ def try_import_optional_modules() -> None:
                 import z3
             except ImportError as e:
                 sys.stderr.write(f'ERROR: Failed to import z3: {e}\n')
-                sys.exit()
+                sys.exit(-1)
 
             g_optional_modules_register['z3'] = True
 
@@ -8844,6 +8844,10 @@ def usage() -> None:
     print()
     print("        Show the software license this program is released under")
     print()
+    print("  --version")
+    print()
+    print("        Show version")
+    print()
     print("Available settings:")
     print()
     print("  Default value for each setting is shown after the '=' sign")
@@ -8885,7 +8889,7 @@ def parse_cmdline_args() -> None:  # noqa
     for arg in sys.argv[1:]:
         if not arg.startswith('--'):
             sys.stderr.write("options should start with \"--\"\n")
-            sys.exit()
+            sys.exit(-1)
 
         if arg == '--help':
             usage()
@@ -8895,20 +8899,28 @@ def parse_cmdline_args() -> None:  # noqa
             show_license()
             sys.exit()
 
-        if '=' not in arg:
-            sys.stderr.write("After setting name, \"=\" is expected\n")
+        if arg == '--version':
+            print(VERSION)
             sys.exit()
 
-        argname, value_str = arg[2:].split('=')
+        if '=' in arg:
+            argname, value_str = arg[2:].split('=')
+        else:
+            argname = arg[2:]
+            value_str = ''
 
         name = argname.replace('-', '_')
         if not name.isidentifier():
             sys.stderr.write("Incorrect setting name\n")
-            sys.exit()
+            sys.exit(-1)
 
         if not SymEnvironment.is_option(name):
             sys.stderr.write(f"Unrecognized setting \"--{argname}\"\n")
-            sys.exit()
+            sys.exit(-1)
+
+        if not value_str:
+            sys.stderr.write(f"Value for \"--{argname}\" must be specified\n")
+            sys.exit(-1)
 
         cur_v = getattr(env, name)
         if isinstance(cur_v, bool):
@@ -8919,24 +8931,24 @@ def parse_cmdline_args() -> None:  # noqa
             else:
                 sys.stderr.write(
                     f"Setting \"--{argname}\" can be only 'true' or 'false'\n")
-                sys.exit()
+                sys.exit(-1)
         elif isinstance(cur_v, set):
             try:
                 setattr(env, name, value_str.split(','))
             except ValueError as e:
                 sys.stderr.write(f"Incorrect value for --{argname}: {e}'\n")
-                sys.exit()
+                sys.exit(-1)
         elif isinstance(cur_v, tuple):
             try:
                 setattr(env, name, value_str.split())
             except ValueError as e:
                 sys.stderr.write(f"Incorrect value for --{argname}: {e}'\n")
-                sys.exit()
+                sys.exit(-1)
         elif isinstance(cur_v, int):
             if not value_str.isdigit():
                 sys.stderr.write(
                     f"Non-negative integer expected for --{argname}\n")
-                sys.exit()
+                sys.exit(-1)
 
             setattr(env, name, int(value_str))
         elif isinstance(cur_v, float):
@@ -8944,7 +8956,7 @@ def parse_cmdline_args() -> None:  # noqa
                 setattr(env, name, float(value_str))
             except ValueError as e:
                 sys.stderr.write(f"Incorrect value for --{argname}: {e}'\n")
-                sys.exit()
+                sys.exit(-1)
         elif isinstance(cur_v, SigVersion):
             setattr(env, name, value_str)
         elif isinstance(cur_v, str):
@@ -8973,6 +8985,8 @@ def main_cli() -> None:
         except OSError:
             pass
 
+
+VERSION = "0.1.0.pre0"
 
 if __name__ == '__main__':
     main_cli()
