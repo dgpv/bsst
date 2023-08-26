@@ -17,6 +17,8 @@ import bsst
 
 is_tapscript = False
 
+SKIP_UNTIL_TESTCASE = 0
+
 
 @contextmanager
 def FreshEnv(*, z3_enabled: bool = False
@@ -222,9 +224,9 @@ def process_testcase_single(
         root_bp = env.get_root_branch()
 
         for i, wd in enumerate(witness_data):
-            if env.minimaldata_flag_strict and wd.is_non_minimal and \
-                    not flags_were_altered:
-                assert expected_result in ('MINIMALDATA', 'UNKNOWN_ERROR')
+            if env.minimaldata_flag_strict and wd.is_non_minimal:
+                if not flags_were_altered:
+                    assert expected_result in ('MINIMALDATA', 'UNKNOWN_ERROR')
                 return
 
             static_data_name = f'<witness_data_static_{i}>'
@@ -369,6 +371,10 @@ def process_testcase_single(
             return
 
         assert len(valid_contexts) == 0
+
+        if flags_were_altered:
+            # with altered flags, we only care that the script has failed
+            return
 
         if expected_result == 'UNBALANCED_CONDITIONAL':
             assert any(f.startswith('unbalanced conditional')
@@ -587,8 +593,8 @@ def test() -> None:
 
             tc_no += 1
             print("TESTCASE no.", tc_no)
-            # if tc_no < 1014:
-            #     continue
+            if tc_no < SKIP_UNTIL_TESTCASE:
+                continue
 
             if isinstance(testcase[0], list):
                 # skip witness program tests
