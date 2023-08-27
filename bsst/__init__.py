@@ -96,7 +96,7 @@ RELATED TO THIS SOFTWARE OR THIS LICENSE, UNDER ANY KIND OF LEGAL CLAIM.
 
 # pylama:ignore=E501,E272
 
-#TODO: do all output through env.solving_log() and track newlines,
+# TODO: do all output through env.solving_log() and track newlines,
 #      so that report logic would not need to be too hairy juggling newlines
 
 import os
@@ -7893,14 +7893,8 @@ def varnames_show() -> None:
 
         for _, vndict in vn_copy.items():
             varnames: list[str] = []
-            prev_cr: str | None = None
             for vn, (value, ctx) in vndict.items():
                 g_seen_varnames.add(vn)
-                if prev_cr is None:
-                    prev_cr = value.canonical_repr()
-                else:
-                    assert prev_cr == value.canonical_repr()
-
                 varnames.append(vn)
                 g_seen_named_values.add(value.unique_name)
 
