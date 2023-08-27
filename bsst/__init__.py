@@ -3447,7 +3447,12 @@ class Enforcement:
             else:
                 reprtext = self.cond.readable_repr(with_name=self.name)
 
-            if self.is_script_bool:
+            is_obvious_bool = False
+            if cv := self.cond.get_constrained_value():
+                is_obvious_bool = (set(cv.possible_values) == set((0, 1)) or
+                                   cv.single_value in (1, b'\x01'))
+
+            if self.is_script_bool and not is_obvious_bool:
                 reprtext = f'BOOL({reprtext})'
 
             pos_info_tag = ''
