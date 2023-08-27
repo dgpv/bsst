@@ -9,11 +9,10 @@ from typing import Generator
 
 import bsst
 
-testcase1 = """
+testcase1 = """DUP
 DUP
 DUP
-DUP
-ADD   // =>b
+ADD   // =>b1
 VERIFY
 SWAP
 DUP
@@ -22,14 +21,18 @@ VERIFY
 IF
 DUP
 ADD // =>z
+DUP
+VERIFY
 ELSE
 DUP
-ADD // =>b
+ADD // =>b2
+DUP
+VERIFY
 ENDIF
 DUP
-ADD // =>b
+ADD // =>b3
 DUP
-ADD // =>b
+ADD // =>b4
 VERIFY
 TRUE
 """
@@ -38,9 +41,9 @@ expected_result = """============
 Valid paths:
 ============
 
-IF wit0 @ 9:L11 : True
+IF wit0 @ 9:L10 : True
 ----------------------
-IF wit0 @ 9:L11 : False
+IF wit0 @ 9:L10 : False
 -----------------------
 
 ==============================
@@ -50,27 +53,27 @@ Enforced constraints per path:
 All valid paths:
 ----------------
 
-        BOOL(b) @ 4:L6
-        BOOL(x) @ 8:L10
+        BOOL(b1) @ 4:L5
+        BOOL(x) @ 8:L9
+        BOOL(b4) @ 24:L25
+        BOOL(1) @ END
 
-IF wit0 @ 9:L11 : True
+IF wit0 @ 9:L10 : True
 ----------------------
 
-        BOOL(b) @ 4:L6
-        BOOL(x) @ 8:L10
+        BOOL(z) @ 13:L14
 
-IF wit0 @ 9:L11 : False
+IF wit0 @ 9:L10 : False
 -----------------------
 
-        b @ 4:L6
-        x @ 8:L10
+        BOOL(b2) @ 18:L19
 
 Where:
 ------
-	b = x = ADD(wit0, wit0)
-	b' = ADD(b, b)
-	b'' = ADD(b, b)
-	b''' = z = ADD(wit1, wit1)
+	b1 = x = ADD(wit0, wit0)
+	b4 = ADD(b3, b3)
+	b3 = ADD(b2, b2)
+	b2 = z = ADD(wit1, wit1)
 
 ==================================
 Witness usage for all valid paths:
@@ -84,7 +87,7 @@ with_z3_result = """============
 Valid paths:
 ============
 
-IF wit0 @ 9:L11 : True
+IF wit0 @ 9:L10 : True
 ----------------------
 
 ==============================
@@ -94,46 +97,42 @@ Enforced constraints per path:
 All valid paths:
 ----------------
 
-        <*> BOOL(b) @ 4:L6
-        <*> BOOL(x) @ 8:L10
-        BOOL(b) @ 20:L22
+        <*> BOOL(b1) @ 4:L5
+        <*> BOOL(x) @ 8:L9
+        <*> BOOL(z) @ 13:L14
+        <*> BOOL(b4) @ 24:L25
         BOOL(1) @ END
 
 Where:
 ------
-	b = x = ADD(wit0, wit0)
-	b' = ADD(b, b)
-	b'' = ADD(z, z)
+	b1 = x = ADD(wit0, wit0)
 	z = ADD(wit1, wit1)
+	b4 = ADD(b3, b3)
+	b3 = ADD(z, z)
 
-===================================================
-Witness usage and model values for all valid paths:
-===================================================
+==================================
+Witness usage for all valid paths:
+==================================
 Witnesses used: 2
-Stack:
-	wit0 = 1
-	wit1 : -536870911
-
-	<result> = 1
 
 ==================
 Failures per path:
 ==================
 
-IF wit0 @ 9:L11 : False
+IF wit0 @ 9:L10 : False
 -----------------------
-Detected at IF @ 9:L11
+Detected at IF @ 9:L10
 
 One of:
 ~~~~~~~
-IF @ 9:L11: check_branch_condition_invalid
+IF @ 9:L10: check_branch_condition_invalid
 
   stack:
 	wit0
 
   vfExec: [False]
 
-VERIFY @ 8:L10: check_verify
+VERIFY @ 8:L9: check_verify
 
   stack:
 	ADD(wit0, wit0)
@@ -142,13 +141,12 @@ VERIFY @ 8:L10: check_verify
 Enforcements before failure was detected:
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-	b @ 4:L6
-	x @ 8:L10
+	BOOL(b1) @ 4:L5
+	BOOL(x) @ 8:L9
 
 Where:
 ------
-	b = x = ADD(wit0, wit0)
-
+	b1 = x = ADD(wit0, wit0)
 
 """  # noqa
 

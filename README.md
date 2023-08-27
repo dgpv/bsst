@@ -373,13 +373,6 @@ without installing `bsst` python module.
         specially-formatted comments will be unrestricted. Otherwise, these
         variable names will be checked to be valid python identifiers
 
-  --allow-duplicate-varnames=true
-
-        If true, varable names assigned to values in the script via
-        specially-formatted comments can be used more than once for different
-        values. Apostrophes <<'>> will be appended to the name to distinguish
-        different values with the same given name
-
   --assume-no-160bit-hash-collisions=false
 
         If true, it is assumed that 160-bit hashes will never collide,

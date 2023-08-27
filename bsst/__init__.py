@@ -511,19 +511,6 @@ class SymEnvironment:
         self._restrict_varnames = value
 
     @property
-    def allow_duplicate_varnames(self) -> bool:
-        """If true, varable names assigned to values in the script via
-        specially-formatted comments can be used more than once for different
-        values. Apostrophes <<'>> will be appended to the name to distinguish
-        different values with the same given name
-        """
-        return self._allow_duplicate_varnames
-
-    @allow_duplicate_varnames.setter
-    def allow_duplicate_varnames(self, value: bool) -> None:
-        self._allow_duplicate_varnames = value
-
-    @property
     def assume_no_160bit_hash_collisions(self) -> bool:
         """If true, it is assumed that 160-bit hashes will never collide,
         and the expression "For all x, y, hashfun(x) == hashfun(y) <=> x == y"
@@ -957,7 +944,6 @@ class SymEnvironment:
         self._disable_error_code_tracking_with_z3 = False
         self._is_incomplete_script = False
         self._restrict_varnames = True
-        self._allow_duplicate_varnames = True
         self._assume_no_160bit_hash_collisions = False
         self._skip_immediately_failed_branches_on = (OP_VERIFY,)
         self._sigversion = SigVersion.TAPSCRIPT
@@ -3073,7 +3059,6 @@ g_script_body: tuple[Union[OpCode, 'ScriptData'], ...] = ()
 g_line_no_table: list[int] = []
 g_var_save_positions: dict[int, str] = {}
 g_varnames_table: dict[str, dict[str, tuple['SymData', 'ExecContext']]] = {}
-g_seen_varnames: set[str] = set()
 g_seen_named_values: set[str] = set()
 
 
@@ -4505,22 +4490,9 @@ class SymData:
 
             cr = self.canonical_repr()
             for vn in ([varname] + list(self._varname_aliases)):
-
-                while vn in g_seen_varnames:
-                    vn = f"{vn}'"
-
-                while True:
-                    for other_cr, other_entry in g_varnames_table.items():
-                        if other_cr != cr and vn in other_entry:
-                            vn = f"{vn}'"
-                            break
-                    else:
-                        break
-
                 entry = g_varnames_table.get(cr, {})
                 entry[vn] = (self, cur_context())
                 g_varnames_table[cr] = entry
-                varname = vn
 
         return varname
 
@@ -7607,15 +7579,11 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
                 varname = ''
 
         if varname:
-            if not env.allow_duplicate_varnames:
-                if varname in seen_varnames:
-                    die(f'varname at line {line_no} was already used at line '
-                        f'{seen_varnames[varname]}')
+            if varname in seen_varnames:
+                die(f'varname at line {line_no} was already used at line '
+                    f'{seen_varnames[varname]}')
 
-                seen_varnames[varname] = line_no
-
-            if "'" in varname:
-                die("apostrophe <<'>> is not allowed in varnames")
+            seen_varnames[varname] = line_no
 
             var_save_positions[len(opcodes)-1] = varname
 
@@ -7884,8 +7852,9 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
 
 def varnames_show() -> None:
 
-    g_seen_varnames.clear()
     g_seen_named_values.clear()
+
+    seen_varnames: set[str] = set()
 
     def get_varnames_rec() -> list[tuple[list[str], str]]:
         result: list[tuple[list[str], str]] = []
@@ -7894,14 +7863,17 @@ def varnames_show() -> None:
         for _, vndict in vn_copy.items():
             varnames: list[str] = []
             for vn, (value, ctx) in vndict.items():
-                g_seen_varnames.add(vn)
-                varnames.append(vn)
+                if vn not in seen_varnames:
+                    varnames.append(vn)
+
                 g_seen_named_values.add(value.unique_name)
 
             g_varnames_table.clear()
 
-            with CurrentExecContext(ctx):
-                result.append((varnames, repr(value)))
+            if varnames:
+                with CurrentExecContext(ctx):
+                    result.append((varnames, repr(value)))
+                    seen_varnames.update(varnames)
 
             result.extend(get_varnames_rec())
 
@@ -7912,8 +7884,6 @@ def varnames_show() -> None:
 
     for varnames, val in get_varnames_rec():
         print(f'\t{" = ".join(varnames)} = {val}')
-
-    g_seen_varnames.clear()
 
 
 def print_as_header(lines_or_str: str | Iterable[str], level: int = 0,
