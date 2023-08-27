@@ -89,10 +89,10 @@ OR CONDITION, AND THE CONTRIBUTOR WON'T BE LIABLE TO ANYONE FOR ANY DAMAGES
 RELATED TO THIS SOFTWARE OR THIS LICENSE, UNDER ANY KIND OF LEGAL CLAIM.
 """
 
-# NOTE: while types for z3 are give, because at the time of writing the
-# z3 python module did not have typing, effectively all z3 types are 'Any'.
-# But when eventually z3 module would become typed, we then can check and
-# any problems that could be then detected
+# NOTE: while types for values from z3 module are given, because at the
+# time of writing the z3 python module did not have typing, effectively
+# all z3 types are 'Any'. But when eventually z3 module would become typed,
+# we then can check and any problems that could be then detected
 
 # pylama:ignore=E501,E272
 
