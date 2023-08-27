@@ -96,6 +96,9 @@ RELATED TO THIS SOFTWARE OR THIS LICENSE, UNDER ANY KIND OF LEGAL CLAIM.
 
 # pylama:ignore=E501,E272
 
+#TODO: do all output through env.solving_log() and track newlines,
+#      so that report logic would not need to be too hairy juggling newlines
+
 import os
 import re
 import sys
@@ -7406,9 +7409,13 @@ def symex_script() -> None:  # noqa
 
         if env.log_solving_attempts:
             env.solving_log('\n')
+
             env.solving_log(
                 f'Analyzing from position {op_pos_info(max(0, ctx.pc-1))}')
-            env.solving_log('\n\n')
+
+            env.solving_log('\n')
+            if env.do_progressive_z3_checks:
+                env.solving_log('\n')
 
         z3_push_context()
 
@@ -7783,13 +7790,19 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
             if is_verify_target:
                 verify_targets.append(e)
 
+    txvalues = ctx.tx.values()
+    got_model_values = (env.produce_model_values and
+                        (ctx.used_witnesses or txvalues or ctx.stack
+                         or g_data_identifiers))
+
+    got_output = False
+
     if env.produce_model_values:
 
         z3_push_context()
 
-        txvalues = ctx.tx.values()
-
-        if env.log_progress and (ctx.used_witnesses or txvalues or top):
+        if env.log_progress and got_model_values:
+            got_output = True
             print()
             print_as_header('Checking for non-variable model values',
                             level=2, is_solving=True)
@@ -7830,7 +7843,12 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
 
     if env.check_always_true_enforcements and verify_targets:
         if env.log_progress:
+            got_output = True
+
             print()
+            if not got_model_values and not env.do_progressive_z3_checks:
+                print()
+
             print_as_header('Checking for always-true enforcements',
                             level=2, is_solving=True)
 
@@ -7856,7 +7874,8 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
         z3_pop_context()
 
     if env.log_progress and (not env.log_solving_attempts
-                             or env.log_solving_attempts_to_stderr):
+                             or env.log_solving_attempts_to_stderr
+                             or not got_output):
         print()
 
     if top:
