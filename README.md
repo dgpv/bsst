@@ -82,7 +82,9 @@ A special format of comment is recoginzed:
 `OP_ADD // =>add_result` will mark the value on the stack after `OP_ADD` with
 the identifier `add_result`, and this identifier will be used in the report.
 There should be no whitespace between `=>` and the identifier. There may be
-whitespace between `//` and `=>`, but nothing other than whitespace.
+whitespace between `//` and `=>`, but nothing other than whitespace. In the case when
+different code paths result in different values assigned to the same identifier,
+an apostrophe <<'>> will be appended to the identifier with different value.
 
 ## Reports
 
@@ -368,11 +370,12 @@ without installing `bsst` python module.
         If true, final result check will be skipped, and
         `--cleanstack-flag` will be set to false
 
-  --restrict-varnames=true
+  --restrict-data-identifier-names=true
 
-        If false, varable names assigned to values in the script via
-        specially-formatted comments will be unrestricted. Otherwise, these
-        variable names will be checked to be valid python identifiers
+        If false, identifiers assigned to values in the script via
+        specially-formatted comments will be unrestricted, except that
+        apostrophe <<'>> is not allowed. Otherwise, these
+        identifiers will be checked to be valid python identifiers
 
   --assume-no-160bit-hash-collisions=false
 

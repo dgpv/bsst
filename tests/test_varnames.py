@@ -9,7 +9,11 @@ from typing import Generator
 
 import bsst
 
-testcase1 = """DUP
+testcase: list[str] = []
+expected_result: list[str] = []
+expected_result_z3: list[str] = []
+
+tcstr = """DUP
 DUP
 DUP
 ADD   // =>b1
@@ -36,8 +40,10 @@ ADD // =>b4
 VERIFY
 TRUE
 """
+testcase.append(tcstr)
 
-expected_result = """============
+
+erstr = """============
 Valid paths:
 ============
 
@@ -56,7 +62,7 @@ All valid paths:
         BOOL(b1) @ 4:L5
         BOOL(x) @ 8:L9
         BOOL(b4) @ 24:L25
-        BOOL(1) @ END
+        1 @ END
 
 IF wit0 @ 9:L10 : True
 ----------------------
@@ -82,73 +88,52 @@ Witnesses used: 2
 
 """  # noqa
 
+expected_result.append(erstr)
 
-with_z3_result = """============
+testcase.append("IF 1 ELSE 2 ENDIF // =>x")
+
+erstr = """============
 Valid paths:
 ============
 
-IF wit0 @ 9:L10 : True
+IF wit0 @ 0:L1 : True
+---------------------
+IF wit0 @ 0:L1 : False
 ----------------------
 
 ==============================
 Enforced constraints per path:
 ==============================
 
-All valid paths:
-----------------
+IF wit0 @ 0:L1 : True
+---------------------
 
-        <*> BOOL(b1) @ 4:L5
-        <*> BOOL(x) @ 8:L9
-        <*> BOOL(z) @ 13:L14
-        <*> BOOL(b4) @ 24:L25
-        BOOL(1) @ END
+        x @ END
 
-Where:
-------
-	b1 = x = ADD(wit0, wit0)
-	z = ADD(wit1, wit1)
-	b4 = ADD(b3, b3)
-	b3 = ADD(z, z)
+IF wit0 @ 0:L1 : False
+----------------------
 
-==================================
-Witness usage for all valid paths:
-==================================
-Witnesses used: 2
-
-==================
-Failures per path:
-==================
-
-IF wit0 @ 9:L10 : False
------------------------
-Detected at IF @ 9:L10
-
-One of:
-~~~~~~~
-IF @ 9:L10: check_branch_condition_invalid
-
-  stack:
-	wit0
-
-  vfExec: [False]
-
-VERIFY @ 8:L9: check_verify
-
-  stack:
-	ADD(wit0, wit0)
-	wit0
-
-Enforcements before failure was detected:
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-	BOOL(b1) @ 4:L5
-	BOOL(x) @ 8:L9
+        BOOL(x') @ END
 
 Where:
 ------
-	b1 = x = ADD(wit0, wit0)
+	x = 1
+	x' = 2
+
+=======================
+Witness usage per path:
+=======================
+IF wit0 @ 0:L1 : True
+---------------------
+Witnesses used: 1
+
+IF wit0 @ 0:L1 : False
+----------------------
+Witnesses used: 1
 
 """  # noqa
+
+expected_result.append(erstr)
 
 
 @contextmanager
@@ -174,11 +159,12 @@ def FreshEnv() -> Generator[None, None, None]:
             yield
 
 
-def test() -> None:
+def test(testno: int, expres: list[int]) -> None:
     with FreshEnv():
         (bsst.g_script_body,
          bsst.g_line_no_table,
-         bsst.g_var_save_positions) = bsst.get_opcodes(testcase1.split('\n'))
+         bsst.g_var_save_positions) = bsst.get_opcodes(
+             testcase[testno].split('\n'))
 
         out: str = ''
         with CaptureStdout() as output:
@@ -188,11 +174,16 @@ def test() -> None:
             bsst.report()
             out = output.getvalue()
 
-        if out != expected_result:
+        if out != expres[testno]:
             print("NO MATCH")
+            print("_____________________________________")
+            print("Script:")
+            print("_____________________________________")
+            print(testcase[testno])
+            print("_____________________________________")
             print("Expected:")
             print("_____________________________________")
-            print(expected_result)
+            print(expres[testno])
             print("_____________________________________")
             print("Got:")
             print("_____________________________________")
@@ -202,4 +193,5 @@ def test() -> None:
 
 
 if __name__ == '__main__':
-    test()
+    for i in range(len(expected_result)):
+        test(i, expected_result)

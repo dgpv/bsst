@@ -499,16 +499,17 @@ class SymEnvironment:
         self._is_incomplete_script = value
 
     @property
-    def restrict_varnames(self) -> bool:
-        """If false, varable names assigned to values in the script via
-        specially-formatted comments will be unrestricted. Otherwise, these
-        variable names will be checked to be valid python identifiers
+    def restrict_data_identifier_names(self) -> bool:
+        """If false, identifiers assigned to values in the script via
+        specially-formatted comments will be unrestricted, except that
+        apostrophe <<'>> is not allowed. Otherwise, these
+        identifiers will be checked to be valid python identifiers
         """
-        return self._restrict_varnames
+        return self._restrict_data_identifier_names
 
-    @restrict_varnames.setter
-    def restrict_varnames(self, value: bool) -> None:
-        self._restrict_varnames = value
+    @restrict_data_identifier_names.setter
+    def restrict_data_identifier_names(self, value: bool) -> None:
+        self._restrict_data_identifier_names = value
 
     @property
     def assume_no_160bit_hash_collisions(self) -> bool:
@@ -943,7 +944,7 @@ class SymEnvironment:
         self._all_z3_assertions_are_tracked_assertions = False
         self._disable_error_code_tracking_with_z3 = False
         self._is_incomplete_script = False
-        self._restrict_varnames = True
+        self._restrict_data_identifier_names = True
         self._assume_no_160bit_hash_collisions = False
         self._skip_immediately_failed_branches_on = (OP_VERIFY,)
         self._sigversion = SigVersion.TAPSCRIPT
@@ -1271,7 +1272,7 @@ g_secp256k1_has_xonly_pubkeys = False
 
 g_is_in_processing = False
 
-g_do_process_varnames = False
+g_do_process_data_identifier_names = False
 
 g_dummyexpr_counter = 0
 g_stack_symdata_index: int | None = None
@@ -1388,27 +1389,27 @@ class DummyExpr:
 def VarnamesDisplay(show_assignments: bool = False,
                     print_extra_newline: bool = False
                     ) -> Generator[None, None, None]:
-    global g_do_process_varnames
+    global g_do_process_data_identifier_names
 
-    assert not g_do_process_varnames, \
+    assert not g_do_process_data_identifier_names, \
         "no recursive calls to VarnamesDisplay"
 
-    g_do_process_varnames = True
-    g_varnames_table.clear()
+    g_do_process_data_identifier_names = True
+    g_data_identifier_names_table.clear()
 
     try:
         yield
-        if g_varnames_table and show_assignments:
+        if g_data_identifier_names_table and show_assignments:
             print()
             print('Where:')
             print('------')
-            varnames_show()
+            data_identifier_names_show()
             print()
         elif print_extra_newline:
             print()
     finally:
-        g_do_process_varnames = False
-        g_varnames_table.clear()
+        g_do_process_data_identifier_names = False
+        g_data_identifier_names_table.clear()
 
 
 class FailureCodeDispatcher:
@@ -3058,7 +3059,7 @@ class ScriptData:
 g_script_body: tuple[Union[OpCode, 'ScriptData'], ...] = ()
 g_line_no_table: list[int] = []
 g_var_save_positions: dict[int, str] = {}
-g_varnames_table: dict[str, dict[str, tuple['SymData', 'ExecContext']]] = {}
+g_data_identifier_names_table: dict[str, dict[str, tuple['SymData', 'ExecContext']]] = {}
 g_seen_named_values: set[str] = set()
 
 
@@ -3364,14 +3365,14 @@ class Branchpoint:
                                 p2: tuple[SymData, ExecContext]) -> None:
             d1, c1 = p1
             d2, c2 = p2
-            if d1._varname != d2._varname:
-                if d1._varname is None:
-                    d1._varname = d2._varname
-                elif d2._varname is None:
-                    d2._varname = d1._varname
+            if d1._data_identifier != d2._data_identifier:
+                if d1._data_identifier is None:
+                    d1._data_identifier = d2._data_identifier
+                elif d2._data_identifier is None:
+                    d2._data_identifier = d1._data_identifier
                 else:
-                    d2._varname_aliases.add(d1._varname)
-                    d1._varname_aliases.add(d2._varname)
+                    d2._data_identifier_aliases.add(d1._data_identifier)
+                    d1._data_identifier_aliases.add(d2._data_identifier)
 
             assert len(d1._args) == len(d2._args)
             for idx in range(len(d1._args)):
@@ -4242,9 +4243,9 @@ class IntLE64(bytes):
 
 class SymData:
     _args: tuple['SymData', ...] = ()
-    _varname: str | None = None
-    _varname_was_reset: bool = False
-    _varname_aliases: set[str]
+    _data_identifier: str | None = None
+    _data_identifier_was_reset: bool = False
+    _data_identifier_aliases: set[str]
     _unique_name: str
 
     _Int: Optional['z3.ArithRef'] = None
@@ -4273,7 +4274,7 @@ class SymData:
 
         self._name = name
         self._wit_no = witness_number
-        self._varname_aliases = set()
+        self._data_identifier_aliases = set()
 
         ctx = cur_context()
         pc = ctx.pc
@@ -4429,20 +4430,20 @@ class SymData:
         if update_solver:
             self.update_solver_for_constrained_value(cv)
 
-    def set_varname(self, varname: str) -> None:
-        if self._varname is not None or self._varname_was_reset:
-            if not self._varname_was_reset:
+    def set_data_identifier(self, data_identifier: str) -> None:
+        if self._data_identifier is not None or self._data_identifier_was_reset:
+            if not self._data_identifier_was_reset:
                 ctx = cur_context()
                 ctx.warnings.append(
                     (ctx.pc,
-                     f'Tried to replace varname {self._varname} with varname '
-                     f'{varname} at {op_pos_info(ctx.pc)}, varname is reset to '
+                     f'Tried to replace data_identifier {self._data_identifier} with data_identifier '
+                     f'{data_identifier} at {op_pos_info(ctx.pc)}, data_identifier is reset to '
                      f'empty, to prevent confusion'))
-                self._varname_was_reset = True
+                self._data_identifier_was_reset = True
 
-            self._varname = None
+            self._data_identifier = None
         else:
-            self._varname = varname
+            self._data_identifier = data_identifier
 
     @property
     def is_static(self) -> bool:
@@ -4483,23 +4484,35 @@ class SymData:
 
         non_static_value_error('cannot be represented as bytes')
 
-    def _maybe_varname(self) -> str | None:
-        if not g_do_process_varnames:
+    def _maybe_data_identifier(self) -> str | None:
+        if not g_do_process_data_identifier_names:
             return None
 
         if self._unique_name in g_seen_named_values:
             return None
 
-        varname = self._varname
-        if varname is not None:
+        data_identifier = self._data_identifier
+        if data_identifier is not None:
 
             cr = self.canonical_repr()
-            for vn in ([varname] + list(self._varname_aliases)):
-                entry = g_varnames_table.get(cr, {})
-                entry[vn] = (self, cur_context())
-                g_varnames_table[cr] = entry
+            for did in ([data_identifier] + list(self._data_identifier_aliases)):
+                while True:
+                    for other_cr, other_entry in g_data_identifier_names_table.items():
+                        if other_cr != cr and did in other_entry:
+                            did_altname = f"{did}'"
+                            if did == data_identifier:
+                                data_identifier = did_altname
 
-        return varname
+                            did = did_altname
+                            break
+                    else:
+                        break
+
+                entry = g_data_identifier_names_table.get(cr, {})
+                entry[did] = (self, cur_context())
+                g_data_identifier_names_table[cr] = entry
+
+        return data_identifier
 
     def set_model_value(self, cv: Optional[ConstrainedValue]) -> None:
         if cv is None:
@@ -4555,8 +4568,8 @@ class SymData:
         return self.readable_repr()
 
     def readable_repr(self, with_name: str = '') -> str:  # noqa
-        if vn := self._maybe_varname():
-            return vn
+        if did := self._maybe_data_identifier():
+            return did
 
         name = with_name or self._name or '_'
 
@@ -5012,8 +5025,8 @@ class SymDepth(SymData):
         return self._unique_name
 
     def __repr__(self) -> str:
-        if vn := self._maybe_varname():
-            return vn
+        if did := self._maybe_data_identifier():
+            return did
 
         if cur_context().is_finalized:
             result_str = f'{self._name}:{self.depth}'
@@ -7418,9 +7431,9 @@ def symex_script() -> None:  # noqa
             num_pre_op_used_witnesses = len(ctx.used_witnesses)
 
             if symex_op(ctx, op_or_sd):
-                if varname := g_var_save_positions.get(ctx.pc):
+                if data_identifier := g_var_save_positions.get(ctx.pc):
                     if len(ctx.stack) > 0:
-                        ctx.stack[-1].set_varname(varname)
+                        ctx.stack[-1].set_data_identifier(data_identifier)
 
                 num_new_witnesses = len(ctx.used_witnesses) - num_pre_op_used_witnesses
                 assert num_new_witnesses >= 0
@@ -7458,7 +7471,7 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
     line_no_table: list[int] = []
     var_save_positions: dict[int, str] = {}
 
-    seen_varnames: dict[str, int] = {}
+    seen_data_identifier_names: dict[str, int] = {}
 
     line_no = -1
 
@@ -7471,15 +7484,15 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
             sys.stderr.write(f'ERROR at line {line_no}: {msg}\n')
             sys.exit(-1)
 
-        varname = ''
+        data_identifier = ''
         # remove '//' comments
         if m := re.search('//', line):
             comment = line[m.end():]
             line = line[:m.start()]
             if m := re.match('\\s*=>(\\S+)', comment):
-                varname = m.group(1)
-                if re.match('wit\\d+', varname):
-                    die(f'reserved varname {varname} was used at line {line_no}')
+                data_identifier = m.group(1)
+                if re.match('wit\\d+', data_identifier):
+                    die(f'reserved data_identifier {data_identifier} was used at line {line_no}')
 
         for op_str in line.split():
             got_angle_brackets = False
@@ -7576,21 +7589,24 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
             line_no_table.append(line_no)
             opcodes.append(op)
 
-        if varname and env.restrict_varnames:
-            if varname and not varname.isidentifier():
+        if data_identifier and env.restrict_data_identifier_names:
+            if data_identifier and not data_identifier.isidentifier():
                 sys.stderr.write(
-                    f"NOTE: non-identifier varname is ignored on input line "
+                    f"NOTE: non-identifier data_identifier is ignored on input line "
                     f"{line_no}\n")
-                varname = ''
+                data_identifier = ''
 
-        if varname:
-            if varname in seen_varnames:
-                die(f'varname at line {line_no} was already used at line '
-                    f'{seen_varnames[varname]}')
+        if data_identifier:
+            if data_identifier in seen_data_identifier_names:
+                die(f'data_identifier at line {line_no} was already used at line '
+                    f'{seen_data_identifier_names[data_identifier]}')
 
-            seen_varnames[varname] = line_no
+            if "'" in data_identifier:
+                die("apostrophe <<'>> is not allowed in data identifier names")
 
-            var_save_positions[len(opcodes)-1] = varname
+            seen_data_identifier_names[data_identifier] = line_no
+
+            var_save_positions[len(opcodes)-1] = data_identifier
 
     line_no_table.append(line_no+1)
 
@@ -7855,40 +7871,40 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
         ctx.add_enforcement(top, is_script_bool=True)
 
 
-def varnames_show() -> None:
+def data_identifier_names_show() -> None:
 
     g_seen_named_values.clear()
 
-    seen_varnames: set[str] = set()
+    seen_data_identifier_names: set[str] = set()
 
-    def get_varnames_rec() -> list[tuple[list[str], str]]:
+    def get_data_identifier_names_rec() -> list[tuple[list[str], str]]:
         result: list[tuple[list[str], str]] = []
-        vn_copy = g_varnames_table.copy()
+        did_copy = g_data_identifier_names_table.copy()
 
-        for _, vndict in vn_copy.items():
-            varnames: list[str] = []
-            for vn, (value, ctx) in vndict.items():
-                if vn not in seen_varnames:
-                    varnames.append(vn)
+        for _, vndict in did_copy.items():
+            data_identifier_names: list[str] = []
+            for did, (value, ctx) in vndict.items():
+                if did not in seen_data_identifier_names:
+                    data_identifier_names.append(did)
 
                 g_seen_named_values.add(value.unique_name)
 
-            g_varnames_table.clear()
+            g_data_identifier_names_table.clear()
 
-            if varnames:
+            if data_identifier_names:
                 with CurrentExecContext(ctx):
-                    result.append((varnames, repr(value)))
-                    seen_varnames.update(varnames)
+                    result.append((data_identifier_names, repr(value)))
+                    seen_data_identifier_names.update(data_identifier_names)
 
-            result.extend(get_varnames_rec())
+            result.extend(get_data_identifier_names_rec())
 
         g_seen_named_values.clear()
-        g_varnames_table.clear()
+        g_data_identifier_names_table.clear()
 
         return result
 
-    for varnames, val in get_varnames_rec():
-        print(f'\t{" = ".join(varnames)} = {val}')
+    for data_identifier_names, val in get_data_identifier_names_rec():
+        print(f'\t{" = ".join(data_identifier_names)} = {val}')
 
 
 def print_as_header(lines_or_str: str | Iterable[str], level: int = 0,
