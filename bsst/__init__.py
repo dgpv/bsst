@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# This program is release under Prosperity Public License 3.0.0
+# This program is released under Prosperity Public License 3.0.0
 # The text of the license follows:
 """
 # The Prosperity Public License 3.0.0

@@ -24,9 +24,7 @@ def FreshEnv() -> Generator[None, None, None]:
             yield
 
 
-def test():
-    bsst.g_script_body = []
-
+def test() -> None:
     with FreshEnv():
         seq1 = bsst.FreshConst(bsst.IntSeqSortRef(), 'seq')
         seq2 = bsst.FreshConst(bsst.IntSeqSortRef(), 'seq')
@@ -36,7 +34,7 @@ def test():
     def test_common(*,
                     seq2num: Callable[['z3.SeqSortRef', 'z3.ArithRef'], None],
                     int2bytes: Callable[[int], bytes],
-                    min_v: int, max_v: int, max_bytes: int):
+                    min_v: int, max_v: int, max_bytes: int) -> None:
 
         with FreshEnv():
             seq2num(seq1, x)
@@ -74,6 +72,7 @@ def test():
                     model_values_to_retrieve={'x': (x.decl().name(),
                                                     bsst.SymDataRType.INT)})
 
+                assert model
                 assert model['x'].single_value == testval
 
                 bsst.Check(x != y, bsst.failcode('x')())

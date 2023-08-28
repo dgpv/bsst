@@ -164,7 +164,7 @@ def FreshEnv() -> Generator[None, None, None]:
             yield
 
 
-def test(testno: int, expres: list[int]) -> None:
+def test(testno: int, expres: list[str]) -> None:
     with FreshEnv():
         (bsst.g_script_body,
          bsst.g_line_no_table,
