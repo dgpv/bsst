@@ -43,12 +43,14 @@ TRUE
 testcase.append(tcstr)
 
 
-erstr = """============
+erstr = """
+============
 Valid paths:
 ============
 
 IF wit0 @ 9:L10 : True
 ----------------------
+
 IF wit0 @ 9:L10 : False
 -----------------------
 
@@ -92,12 +94,14 @@ expected_result.append(erstr)
 
 testcase.append("IF 1 ELSE 2 ENDIF // =>x")
 
-erstr = """============
+erstr = """
+============
 Valid paths:
 ============
 
 IF wit0 @ 0:L1 : True
 ---------------------
+
 IF wit0 @ 0:L1 : False
 ----------------------
 
@@ -123,6 +127,7 @@ Where:
 =======================
 Witness usage per path:
 =======================
+
 IF wit0 @ 0:L1 : True
 ---------------------
 Witnesses used: 1
