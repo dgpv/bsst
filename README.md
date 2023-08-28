@@ -3,9 +3,9 @@
 
 Copyright (c) 2023 Dmitry Petukhov (https://github.com/dgpv), dp@bsst.dev
 
-Symbolically executes the opcodes, checks constraints that opcodes impose on
-values they process, and shows the report with conditions that the script
-enforce, possible failures, etc.
+Symbolically executes the opcodes, tracks constraints that opcodes impose on
+values they operate on, and shows the report with conditions that the script
+enforces, possible failures, possible values for data, etc.
 
 Supports Bitcoin script and Elements script.
 
@@ -19,7 +19,8 @@ of problems, the analysis algorithm just cannot detect them at all.
 This program should be used as an additional layer of defence in the struggle
 to detect defects and unexpected behavior in the scripts, much like other
 things like testing or code audit are used for this purpose, simply reducing
-the probability of defects being undetected.
+the probability of defects being undetected. It can also be used as a tool to
+better understand the behavior of analyzed scripts.
 
 [Elements script interpreter](https://github.com/ElementsProject/elements/blob/master/src/script/interpreter.cpp),
 which is an extension of Bitcoin script interpreter, was used as reference.
