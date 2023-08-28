@@ -96,9 +96,6 @@ RELATED TO THIS SOFTWARE OR THIS LICENSE, UNDER ANY KIND OF LEGAL CLAIM.
 
 # pylama:ignore=E501,E272
 
-# TODO: do all output through env.solving_log() and track newlines,
-#      so that report logic would not need to be too hairy juggling newlines
-
 import os
 import re
 import sys
@@ -113,6 +110,8 @@ import inspect
 import importlib
 import importlib.util
 import multiprocessing
+
+from typing import TextIO
 from multiprocessing.pool import AsyncResult
 from copy import deepcopy
 from dataclasses import dataclass
@@ -1000,6 +999,7 @@ class SymEnvironment:
         self._enabled_opcodes: list['OpCode'] = []
         self._solver: Optional['z3.Solver'] = None
         self._failure_code: Optional['z3.ArithRef'] = None
+        self._last_output_chars: dict[TextIO, str] = {}
 
     def get_solver(self) -> 'z3.Solver':
         if not self.z3_enabled:
@@ -1026,14 +1026,76 @@ class SymEnvironment:
                 and isinstance(getattr(cls, name), property)
                 and getattr(cls, name).__doc__)
 
-    def solving_log(self, msg: str) -> None:
-        if self._log_solving_attempts_to_stderr:
-            f = sys.stderr
-        else:
-            f = sys.stdout
+    def write_out(self, msg: str, f: TextIO) -> None:
+        if msg:
+            locs = self._last_output_chars.get(f)
+            if locs is None:
+                locs = '  '
 
-        f.write(msg)
-        f.flush()
+            if len(msg) == 1:
+                locs = locs[1] + msg[-1]
+            else:
+                locs = msg[-2:]
+
+            self._last_output_chars[f] = locs
+
+            f.write(msg)
+            f.flush()
+
+    def write(self, msg: str) -> None:
+        self.write_out(msg, sys.stdout)
+
+    def write_line(self, msg: str) -> None:
+        assert not msg.endswith('\n')
+        self.write(f'{msg}\n')
+
+    def ensure_empty_line(self) -> None:
+        self.ensure_empty_line_out(sys.stdout)
+
+    def ensure_newline(self) -> None:
+        self.ensure_newline_out(sys.stdout)
+
+    def ensure_newline_out(self, f: TextIO) -> None:
+        locs = self._last_output_chars.get(f)
+        if locs is None or locs[-1] != '\n':
+            self.write_out('\n', f)
+
+    def ensure_empty_line_out(self, f: TextIO) -> None:
+        locs = self._last_output_chars.get(f)
+
+        if locs is None:
+            self.write_out('\n', f)
+            return
+
+        if locs == '\n\n':
+            return
+
+        if locs[-1] == '\n':
+            self.write_out('\n', f)
+        else:
+            self.write_out('\n\n', f)
+
+    def solving_log_ensure_empty_line(self) -> None:
+        if self.log_solving_attempts_to_stderr:
+            self.ensure_empty_line_out(sys.stderr)
+        elif self.log_solving_attempts:
+            self.ensure_empty_line_out(sys.stdout)
+
+    def solving_log_ensure_newline(self) -> None:
+        if self.log_solving_attempts_to_stderr:
+            self.ensure_newline_out(sys.stderr)
+        elif self.log_solving_attempts:
+            self.ensure_newline_out(sys.stdout)
+
+    def solving_log_line(self, msg: str) -> None:
+        assert not msg.endswith('\n')
+        self.solving_log(f'{msg}\n')
+
+    def solving_log(self, msg: str) -> None:
+        if self.log_solving_attempts_to_stderr:
+            self.write_out(msg, sys.stderr)
+        elif self.log_solving_attempts:
+            self.write_out(msg, sys.stdout)
 
     def get_root_branch(self) -> 'Branchpoint':
         if self._root_branch is None:
@@ -1386,8 +1448,7 @@ class DummyExpr:
 
 
 @contextmanager
-def VarnamesDisplay(show_assignments: bool = False,
-                    print_extra_newline: bool = False
+def VarnamesDisplay(show_assignments: bool = False
                     ) -> Generator[None, None, None]:
     global g_do_process_data_identifier_names
 
@@ -1397,16 +1458,15 @@ def VarnamesDisplay(show_assignments: bool = False,
     g_do_process_data_identifier_names = True
     g_data_identifier_names_table.clear()
 
+    env = cur_env()
+
     try:
         yield
         if g_data_identifier_names_table and show_assignments:
-            print()
-            print('Where:')
-            print('------')
+            env.ensure_empty_line()
+            env.write_line('Where:')
+            env.write_line('------')
             data_identifier_names_show()
-            print()
-        elif print_extra_newline:
-            print()
     finally:
         g_do_process_data_identifier_names = False
         g_data_identifier_names_table.clear()
@@ -2100,7 +2160,7 @@ def z3check(  # noqa
 
     if not got_sat:
         if env.log_progress:
-            print(' <UNSOLVED>', end=' ')
+            env.write(' <UNSOLVED> ')
             if env.exit_on_solver_result_unknown:
                 sys.exit(-1)
 
@@ -2307,7 +2367,7 @@ def is_cond_possible(  # noqa
     z3_push_context()
 
     if (name or sd) and env.log_progress:
-        print("check", name or sd, end=' ')
+        env.write(f'check {name or sd} ')
         if env.log_solving_attempts_to_stderr:
             env.solving_log(f'  check {name or sd} ')
 
@@ -2321,8 +2381,8 @@ def is_cond_possible(  # noqa
             Check(cond)
     except ScriptFailure:
         if sd and env.log_progress and fail_msg:
-            print()
-            print(f'{fail_msg}, because condition is static')
+            env.ensure_newline()
+            env.write_line(f'{fail_msg}, because condition is static')
 
         z3_pop_context()
         return False
@@ -2354,17 +2414,17 @@ def is_cond_possible(  # noqa
 
     if sd and env.log_progress:
         maybe_report_elapsed_time()
-        print()
+        env.ensure_newline()
         if not check_ok and fail_msg:
-            print(fail_msg, end='')
+            env.write(fail_msg)
             if failcodes:
-                print(f', probable cause{"s" if len(failcodes) > 1 else ""}:')
+                env.write_line(f', probable cause{"s" if len(failcodes) > 1 else ""}:')
 
                 for pc, code in failcodes:
                     if not code.startswith('check_possible'):
-                        print(f"\t{code} @ {op_pos_info(pc)}")
+                        env.write_line(f"\t{code} @ {op_pos_info(pc)}")
             else:
-                print()
+                env.write('\n')
 
     return check_ok
 
@@ -4132,7 +4192,8 @@ class ExecContext(SupportsFailureCodeCallbacks):
                 err_to_report = ', '.join(
                     set(fc[0] for fc in parse_failcodes(err)))
 
-            env.solving_log(f'Failure: {err_to_report}\n')
+            env.solving_log(f'Failure: {err_to_report}')
+            env.solving_log_ensure_empty_line()
 
         self.exec_state_log[pc] = self.exec_state.clone()
         self.failure = (pc, err)
@@ -7398,14 +7459,10 @@ def symex_script() -> None:  # noqa
             return
 
         if env.log_solving_attempts:
-            env.solving_log('\n')
-
+            env.solving_log_ensure_empty_line()
             env.solving_log(
                 f'Analyzing from position {op_pos_info(max(0, ctx.pc-1))}')
-
-            env.solving_log('\n')
-            if env.do_progressive_z3_checks:
-                env.solving_log('\n')
+            env.solving_log_ensure_empty_line()
 
         z3_push_context()
 
@@ -7629,8 +7686,7 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
     assert not ctx.failure
     assert ctx.pc == len(g_script_body)
 
-    if env.log_solving_attempts and not env.log_solving_attempts_to_stderr:
-        env.solving_log("\n")
+    env.solving_log_ensure_empty_line()
 
     if ctx.altstack:
         ctx.add_warning(f'Altstack length is {len(ctx.altstack)}')
@@ -7710,19 +7766,18 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
                 processed.append(val)
 
     if env.log_progress:
-        print_as_header("Finalizing path", is_solving=True,
-                        is_solving_single=True)
+        print_as_header("Finalizing path", is_solving=True)
         print_as_header(ctx.get_timeline_strings() or ["[Root]"],
-                        level=1)
+                        level=1, is_solving=True, no_empty_line_above=True)
 
     try:
         mvdict = z3check(force_check=True,
                          model_values_to_retrieve=mvdict_req)
     except ScriptFailure as sf:
         if env.log_progress:
-            print()
-            print("Failed final checks")
-            print()
+            env.ensure_empty_line()
+            env.write("Failed final checks")
+            env.ensure_empty_line()
 
         raise sf
 
@@ -7741,9 +7796,7 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
 
     maybe_report_elapsed_time()
 
-    if env.do_progressive_z3_checks and env.log_solving_attempts and \
-            not env.log_solving_attempts_to_stderr:
-        env.solving_log("\n")
+    env.solving_log_ensure_empty_line()
 
     if env.produce_model_values:
         mvdict = mvdict or {}
@@ -7751,7 +7804,6 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
             val.set_model_value(mvdict.get(name))
 
     if env.log_progress and ctx.z3_warning_vars:
-        print()
         print_as_header('Checking for possible warnings', level=2,
                         is_solving=True)
 
@@ -7784,15 +7836,11 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
                         (ctx.used_witnesses or txvalues or ctx.stack
                          or g_data_identifiers))
 
-    got_output = False
-
     if env.produce_model_values:
 
         z3_push_context()
 
         if env.log_progress and got_model_values:
-            got_output = True
-            print()
             print_as_header('Checking for non-variable model values',
                             level=2, is_solving=True)
 
@@ -7810,7 +7858,7 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
 
         for val in g_data_identifiers.values():
             if val in processed:
-                print(f'skip checking {val}: already checked')
+                env.write_line(f'skip checking {val}: already checked')
             else:
                 val.check_only_one_value_possible()
                 processed.append(val)
@@ -7823,7 +7871,7 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
                 valname = f'stack[{pos}]'
 
             if val in processed:
-                print(f'skip checking {valname}: already checked')
+                env.write_line(f'skip checking {valname}: already checked')
             else:
                 val.check_only_one_value_possible(name=valname)
                 processed.append(val)
@@ -7832,12 +7880,6 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
 
     if env.check_always_true_enforcements and verify_targets:
         if env.log_progress:
-            got_output = True
-
-            print()
-            if not got_model_values and not env.do_progressive_z3_checks:
-                print()
-
             print_as_header('Checking for always-true enforcements',
                             level=2, is_solving=True)
 
@@ -7861,11 +7903,6 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
             g_skip_assertion_for_enforcement_condition = None
 
         z3_pop_context()
-
-    if env.log_progress and (not env.log_solving_attempts
-                             or env.log_solving_attempts_to_stderr
-                             or not got_output):
-        print()
 
     if top:
         ctx.add_enforcement(top, is_script_bool=True)
@@ -7904,11 +7941,11 @@ def data_identifier_names_show() -> None:
         return result
 
     for data_identifier_names, val in get_data_identifier_names_rec():
-        print(f'\t{" = ".join(data_identifier_names)} = {val}')
+        cur_env().write_line(f'\t{" = ".join(data_identifier_names)} = {val}')
 
 
 def print_as_header(lines_or_str: str | Iterable[str], level: int = 0,
-                    is_solving: bool = False, is_solving_single: bool = False
+                    is_solving: bool = False, no_empty_line_above: bool = False
                     ) -> None:
     if level > 2:
         raise ValueError('unsupported header level')
@@ -7921,21 +7958,28 @@ def print_as_header(lines_or_str: str | Iterable[str], level: int = 0,
 
     chtop, chbottom = {0: ('=', '='), 1: (None, '-'), 2: (None, '~')}[level]
 
+    env = cur_env()
+
+    if not no_empty_line_above:
+        env.ensure_empty_line()
+
     max_ll = max(len(ln) for ln in lines) if lines else 0
     if chtop:
-        print(chtop*max_ll)
-    print('\n'.join(lines))
+        env.write_line(chtop*max_ll)
+    env.write_line('\n'.join(lines))
     if chbottom:
-        print(chbottom*max_ll)
+        env.write_line(chbottom*max_ll)
 
     env = cur_env()
 
     if is_solving and env.log_solving_attempts_to_stderr:
-        env.solving_log('\n'.join(lines))
-        if is_solving_single:
-            env.solving_log(' ')
-        else:
-            env.solving_log('\n')
+        if not no_empty_line_above:
+            env.solving_log_ensure_empty_line()
+        if chtop:
+            env.solving_log_line(chtop*max_ll)
+        env.solving_log_line('\n'.join(lines))
+        if chbottom:
+            env.solving_log_line(chbottom*max_ll)
 
 
 def report() -> None:  # noqa
@@ -7960,8 +8004,7 @@ def report() -> None:  # noqa
         unused_value_dict = root_bp.process_unused_values()
 
     if env.log_solving_attempts:
-        if not env.log_solving_attempts_to_stderr:
-            env.solving_log('\n')
+        env.solving_log_ensure_empty_line()
 
     got_warnings = False
     got_failures = False
@@ -8063,10 +8106,8 @@ def report() -> None:  # noqa
 
     if valid_paths:
         print_as_header('Valid paths:')
-        print()
 
-    with VarnamesDisplay(show_assignments=True,
-                         print_extra_newline=bool(valid_paths)):
+    with VarnamesDisplay(show_assignments=True):
         for path in valid_paths:
             print_as_header([bp.repr_for_path() for bp in path] or "[Root]",
                             level=1)
@@ -8077,10 +8118,8 @@ def report() -> None:  # noqa
         else:
             print_as_header('No enforced constraints')
 
-    with VarnamesDisplay(show_assignments=True,
-                         print_extra_newline=bool(valid_paths)):
+    with VarnamesDisplay(show_assignments=True):
         for path in paths:
-            print()
             if path:
                 print_as_header([bp.repr_for_path() for bp in path], level=1)
             else:
@@ -8089,14 +8128,15 @@ def report() -> None:  # noqa
             enflist = list(enforcements_by_path[path])
             enflist.sort(key=lambda bp: bp.pc)
 
-            print()
+            env.ensure_empty_line()
 
             for e in enflist:
-                print(f'        {repr(e)}')
+                env.write_line(f'        {repr(e)}')
+
+    env.ensure_empty_line()
 
     if unused_value_dict:
         print_as_header('Unused values:')
-        print()
         with VarnamesDisplay(show_assignments=True):
             uvset: set[tuple[str, int]] = set()
             for uv, ctx in unused_value_dict.values():
@@ -8106,9 +8146,7 @@ def report() -> None:  # noqa
             combined_uvs = list(uvset)
             combined_uvs.sort(key=lambda v: v[1])
             for uvstr, src_pc in combined_uvs:
-                print(f'\t{uvstr} from {op_pos_info(src_pc)}')
-
-        print()
+                env.write_line(f'\t{uvstr} from {op_pos_info(src_pc)}')
 
     if model_values_map:
         path_msg = 'per path' if len(model_values_map) > 1 else 'for all valid paths'
@@ -8127,17 +8165,18 @@ def report() -> None:  # noqa
                         print_as_header('\n'.join(ctx.get_timeline_strings()),
                                         level=1)
 
-            print(f"Witnesses used: {num_witnesses}")
-            if env.produce_model_values or env.is_incomplete_script:
-                print('Model values:')
-                for ws in mvals:
-                    print(f'\t{ws}')
+            env.write_line(f"Witnesses used: {num_witnesses}")
+            env.ensure_empty_line()
 
-            print()
+            if env.produce_model_values or env.is_incomplete_script:
+                env.write_line('Model values:')
+                for ws in mvals:
+                    env.write_line(f'\t{ws}')
+
+    env.ensure_empty_line()
 
     if got_warnings:
         print_as_header('Warnings per path:')
-        print()
 
         def report_warnings(ctx: ExecContext) -> None:
             if ctx.warnings:
@@ -8152,16 +8191,17 @@ def report() -> None:  # noqa
                 for pc, w in ctx.warnings:
                     w_str = f'{w} @ {op_pos_info(pc)}'
                     if w_str not in shown_warnings:
-                        print(f'\t{w_str}')
+                        env.write_line(f'\t{w_str}')
                         shown_warnings.add(w_str)
 
-                print()
+                env.ensure_empty_line()
 
         root_bp.walk_contexts(report_warnings)
 
+    env.ensure_empty_line()
+
     if got_failures:
         print_as_header('Failures per path:')
-        print()
 
         def report_failures(ctx: ExecContext) -> None:
             if ctx.failure:
@@ -8172,35 +8212,33 @@ def report() -> None:  # noqa
 
                 finfo = ctx.failure_info
                 if isinstance(finfo, str):
-                    print(finfo)
-                    print()
+                    env.write_line(finfo)
+                    env.ensure_empty_line()
                 else:
                     pc = finfo[0]
-                    print(f"Detected at {op_pos_repr(pc)} @ {op_pos_info(pc)}")
-                    print()
+                    env.write_line(f"Detected at {op_pos_repr(pc)} @ {op_pos_info(pc)}")
+                    env.ensure_empty_line()
                     if len(finfo[1]) > 1:
                         print_as_header('One of:', level=2)
                     for info in finfo[1]:
-                        print(info)
-                        print()
+                        env.write_line(info)
+                        env.ensure_empty_line()
 
                 if ctx.enforcements:
                     print_as_header("Enforcements before failure was detected:",
                                     level=2)
-                    print()
 
                     with VarnamesDisplay(show_assignments=True):
                         for e in ctx.enforcements:
-                            print(f'\t{repr(e)}')
+                            env.write_line(f'\t{repr(e)}')
 
-                    print()
+                    env.ensure_empty_line()
 
         root_bp.walk_contexts(report_failures, include_failed=True)
 
     points_of_interest = cur_env().points_of_interest
     if points_of_interest:
         print_as_header('Points of interest:')
-        print()
 
         pc_list = []
         for poi in points_of_interest:
@@ -8217,7 +8255,6 @@ def report() -> None:  # noqa
                     print_as_header(
                         f'Line {line_no} does not contain any operation',
                         level=1)
-                    print()
 
         def report_poi(ctx: ExecContext) -> None:
             global g_script_body
@@ -8233,11 +8270,11 @@ def report() -> None:  # noqa
                     else:
                         op_str = ''
 
-                    print(f"POI @ {op_pos_info(pc)}{op_str}:")
-                    print(f"{ctx.exec_state_log[pc]}")
-                    print("----")
+                    env.write_line(f"POI @ {op_pos_info(pc)}{op_str}:")
+                    env.write_line(f"{ctx.exec_state_log[pc]}")
+                    env.write_line("----")
 
-            print()
+            env.ensure_empty_line()
 
         root_bp.walk_contexts(report_poi, include_failed=True)
 
