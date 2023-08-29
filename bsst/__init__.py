@@ -7716,6 +7716,9 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
         Check(use_as_script_bool(top) != 0, err_final_verify(),
               enforcement_condition=top)
 
+        if top:
+            ctx.add_enforcement(top, is_script_bool=True)
+
     for sd in ctx.sym_depth_register:
         sd_bytes = integer_to_scriptnum(sd.depth)
         if cv := sd.get_constrained_value():
@@ -7889,26 +7892,18 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
         z3_push_context()
 
         for e in verify_targets:
-
-            if e.cond.was_used_as_Int:
-                inval_exp = e.cond.as_Int() == 0
-            else:
-                inval_exp = Length(e.cond.use_as_ByteSeq()) == 0
-
             global g_skip_assertion_for_enforcement_condition
             g_skip_assertion_for_enforcement_condition = (e.cond, e.pc)
 
             ename = f'{e.cond} @ {op_pos_info(e.pc)}'
-            if not is_cond_possible(inval_exp, e.cond, name=ename,
+            if not is_cond_possible(use_as_script_bool(e.cond) == 0,
+                                    e.cond, name=ename,
                                     fail_msg='  - always true'):
                 e.is_always_true_in_path = True
 
             g_skip_assertion_for_enforcement_condition = None
 
         z3_pop_context()
-
-    if top:
-        ctx.add_enforcement(top, is_script_bool=True)
 
 
 def data_identifier_names_show() -> None:
