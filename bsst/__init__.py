@@ -8146,6 +8146,8 @@ def report() -> None:  # noqa
                 with CurrentExecContext(ctx):
                     uvset.add((f'{uv}', uv.src_pc))
 
+            env.ensure_empty_line()
+
             combined_uvs = list(uvset)
             combined_uvs.sort(key=lambda v: v[1])
             for uvstr, src_pc in combined_uvs:
