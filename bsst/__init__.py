@@ -4267,13 +4267,13 @@ class ExecContext(SupportsFailureCodeCallbacks):
 
     def add_enforcement(self, cond: 'SymData', *, name: str = '',
                         is_script_bool: bool = False) -> None:
+        cond.increase_refcount()
         if self.skip_enforcement_in_region:
             start, end = self.skip_enforcement_in_region
             self.skip_enforcement_in_region = None
             if start <= self.pc <= end:
                 return
 
-        cond.increase_refcount()
         self.enforcements.append(
             Enforcement(cond, pc=self.pc, context=self, name=name,
                         is_script_bool=is_script_bool))
