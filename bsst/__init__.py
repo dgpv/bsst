@@ -6037,6 +6037,9 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
             if op not in op_table:
                 raise AssertionError(f"Unhandled binary opcode OP_{op.name}")
 
+            if op in (OP_NOT, OP_0NOTEQUAL):
+                r.set_possible_values(0, 1)
+
             max_size = 4
             if op in (OP_1ADD, OP_1SUB):
                 max_size = 5
