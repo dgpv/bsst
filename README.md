@@ -178,6 +178,10 @@ notice.
 
 The command line interface may also change, but the changes will be noted in [Release notes](release-notes.md)
 
+## Interrupting the solver
+
+When the solver is working, it can be interrupted by sening it a SIGINT signal (usually done with `^C` on the terminal). After interruption, the solver will retry an attempt at solving (with different random seeds, unless solver randomization is disabled), for the maximum amount of tries set with `--max-solver-tries`. To cancel the analysis altogether and quit the program while the solver works, you will need to send a signal other than SIGINT to the program, for example SIGQUIT (usually done with `^\` on the terminal)
+
 ## Installation
 
 Simply clone the repo:
