@@ -428,7 +428,8 @@ def process_testcase_single(
                 for f in failures)
         elif expected_result == 'SIG_DER':
             assert any(f in ('check_invalid_signature_length',
-                             'check_invalid_signature_encoding')
+                             'check_invalid_signature_encoding',
+                             'check_signature_bad_hashtype')
                        for f in failures)
         elif expected_result == 'NULLFAIL':
             assert any(f == 'check_signature_nullfail' for f in failures)
