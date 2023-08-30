@@ -9037,7 +9037,7 @@ def main_cli() -> None:
             pass
 
 
-VERSION = "0.1.0.pre0"
+VERSION = "0.1.0"
 
 if __name__ == '__main__':
     main_cli()
