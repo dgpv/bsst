@@ -126,6 +126,13 @@ Since modelling is not perfect, sometimes incomplete, these values can still be 
 of the script on "real" interpreter. For example, for ECDSA pubkeys only constraints on size and first byte are modelled,
 and model value can show arbitrary data for the rest of pubkey.
 
+NOTE: With Z3 enabled, failure report may give several possible causes for the failure. It does not mean that
+all of these conditions are a definite cause of this particular failure. Some of them may be false positives,
+but this is the nature of Z3 - it gives 'possible causes' for constraint violation, and for the report to give
+more concrete place of failure, much more constraints would need to be placed by the code, which can significantly
+slow down the solving times, and there's still no guarantees that you would always get just one definitive cause of
+constraint violation
+
 ### Example report
 
 For this rather complex Elements script:
