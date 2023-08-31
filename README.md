@@ -131,7 +131,13 @@ all of these conditions are a definite cause of this particular failure. Some of
 but this is the nature of Z3 - it gives 'possible causes' for constraint violation, and for the report to give
 more concrete place of failure, much more constraints would need to be placed by the code, which can significantly
 slow down the solving times, and there's still no guarantees that you would always get just one definitive cause of
-constraint violation
+constraint violation.
+
+NOTE: If one enforcement condition is always true because of the other enforcement condition, and vise versa,
+they will likely be both marked with `<*>`, For example, for `DUP 1 EQUALVERIFY 1 ADD 2 EQUAL` both enforcements
+will be marked with `<*>` (with Z3 enabled). That does not mean that both checks are redundant. Only some of the
+interlocked checks might happen to be be redundant. You always need to reason about the script logic to understand
+why certain checks are marked with `<*>` and if it is wise to remove checks that seem to be redundant.
 
 ### Example report
 
