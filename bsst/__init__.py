@@ -8867,7 +8867,8 @@ def usage() -> None:
     print("This program should be used as an additional layer of defence in the struggle\n"
           "to detect defects and unexpected behavior in the scripts, much like other\n"
           "things like testing or code audit are used for this purpose, simply reducing\n"
-          "the probability of defects being undetected.")
+          "the probability of defects being undetected. It can also be used as a tool to\n"
+          "better understand the behavior of analyzed scripts.")
     print()
     print(f"Free for non-commercial use. Licensed under Prosperity Public License 3.0.0.\n"
           f"Please run \"{progname} --license\" to display the license.\n")
