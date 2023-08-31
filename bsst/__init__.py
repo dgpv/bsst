@@ -8036,9 +8036,6 @@ def report() -> None:  # noqa
                 def get_val_str(v: SymData) -> str:
                     return model_value_line(v)
 
-                for w in bp.context.used_witnesses:
-                    mvals_list.append(f'{w} {get_val_str(w)}')
-
                 txvalues = bp.context.tx.values()
                 for txval in txvalues:
                     mvals_list.append(f'{txval} {get_val_str(txval)}')
@@ -8049,6 +8046,9 @@ def report() -> None:  # noqa
             else:
                 def get_val_str(v: SymData) -> str:
                     return f'= {v}'
+
+            for w in bp.context.used_witnesses:
+                mvals_list.append(f'{w} {get_val_str(w)}')
 
             stack_len = len(bp.context.stack)
             if not env.cleanstack_flag and stack_len > 0:
