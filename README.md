@@ -87,6 +87,10 @@ whitespace between `//` and `=>`, but nothing other than whitespace. In the case
 different code paths result in different values assigned to the same identifier,
 an apostrophe <<'>> will be appended to the identifier with different value.
 
+Data identifiers that start with `tx_` are reserved for transaction fields
+
+Data identifiers that start with `wit<D>` where `<D>` is a digit, are reserved for witnesses
+
 ## Reports
 
 The reports show:

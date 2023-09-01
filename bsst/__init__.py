@@ -7551,7 +7551,8 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
             line = line[:m.start()]
             if m := re.match('\\s*=>(\\S+)', comment):
                 data_identifier = m.group(1)
-                if re.match('wit\\d+', data_identifier):
+                if re.match('wit\\d+', data_identifier) or \
+                        data_identifier.startswith('tx_'):
                     die(f'reserved data_identifier {data_identifier} was used at line {line_no}')
 
         for op_str in line.split():
