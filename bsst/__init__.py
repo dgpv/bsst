@@ -2658,14 +2658,15 @@ def add_ecdsa_sig_constraints(vchSig: Union['SymData', 'z3.ExprRef'], *,
               err_signature_low_s())
 
     if env.strictenc_flag:
-        if is_sig_empty:
-            masked_hash_type = 0
-        elif env.is_elements and env.sigversion == SigVersion.TAPSCRIPT:
+        # If is_sig_empty is static and false, the function will return earlier
+        # therefore we don't need to check it here, because either sig is
+        # not empty, or it is not static, and indexed access to sig is symbolic
+        if env.is_elements and env.sigversion == SigVersion.TAPSCRIPT:
             # 0x40 is SIGHASH_RANGEPROOF
-            masked_hash_type = If(is_sig_empty, 0, sig[sig_size-1] % 0x40)
+            masked_hash_type = sig[sig_size-1] % 0x40
         else:
             # 0x80 is SIGHASH_ANYONECANPAY
-            masked_hash_type = If(is_sig_empty, 0, sig[sig_size-1] % 0x80)
+            masked_hash_type = sig[sig_size-1] % 0x80
 
         Check(Or(is_sig_empty,
                  masked_hash_type == 1,   # SIGHASH_ALL
