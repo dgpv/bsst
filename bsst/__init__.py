@@ -2658,17 +2658,19 @@ def add_ecdsa_sig_constraints(vchSig: Union['SymData', 'z3.ExprRef'], *,
               err_signature_low_s())
 
     if env.strictenc_flag:
-        if env.is_elements and env.sigversion == SigVersion.TAPSCRIPT:
+        if is_sig_empty:
+            masked_hash_type = 0
+        elif env.is_elements and env.sigversion == SigVersion.TAPSCRIPT:
             # 0x40 is SIGHASH_RANGEPROOF
-            hash_type = sig[sig_size-1] % 0x40
+            masked_hash_type = If(is_sig_empty, 0, sig[sig_size-1] % 0x40)
         else:
             # 0x80 is SIGHASH_ANYONECANPAY
-            hash_type = sig[sig_size-1] % 0x80
+            masked_hash_type = If(is_sig_empty, 0, sig[sig_size-1] % 0x80)
 
         Check(Or(is_sig_empty,
-                 hash_type == 1,   # SIGHASH_ALL
-                 hash_type == 2,   # SIGHASH_NONE
-                 hash_type == 3),  # SIGHASH_SINGLE
+                 masked_hash_type == 1,   # SIGHASH_ALL
+                 masked_hash_type == 2,   # SIGHASH_NONE
+                 masked_hash_type == 3),  # SIGHASH_SINGLE
               err_signature_bad_hashtype())
 
 
@@ -2688,10 +2690,18 @@ def add_schnorr_sig_constraints(vchSig: 'SymData',
         vchSig.set_possible_sizes(0, 64, 65,
                                   value_name='SchnorrScignature(...)')
 
+    if vchSig.is_static and vchSig.Length() < 65:
+        masked_hash_type = 0
+    else:
+        masked_hash_type = If(vchSig.Length() < 65,
+                              0, vchSig.as_ByteSeq()[64] % 0x80)
+
     Check(Or(is_upgradeable_pub,
-             vchSig.Length() < 65,
-             vchSig.as_ByteSeq()[64] != 0),
-          err_invalid_signature_encoding())
+             Implies(vchSig.Length() == 65,
+                     Or(masked_hash_type == 1,     # SIGHASH_ALL,
+                        masked_hash_type == 2,     # SIGHASH_NONE
+                        masked_hash_type == 3))),  # SIGHASH_SINGLE
+          err_signature_bad_hashtype())
 
     if not env.discourage_upgradeable_pubkey_type_flag:
         ww = SymData(name='warn_upgradeable_pubkey_checksig_always_pass')

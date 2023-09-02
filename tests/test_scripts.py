@@ -303,17 +303,17 @@ def test() -> None:
     assert "<*> EQUAL(INPUT_1_ISSUANCE_ASSETBLINDINGNONCE, INPUT_ISSUANCE_ASSETBLINDINGNONCE(wit0))" in out
 
     do_test_single("DUP INSPECTINPUTISSUANCE SIZE VERIFY TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK 1 INSPECTINPUTISSUANCE SIZE VERIFY 5 PICK FROMALTSTACK EQUAL NOT VERIFY 4 PICK FROMALTSTACK EQUALVERIFY 3 PICK FROMALTSTACK EQUALVERIFY 2 PICK FROMALTSTACK EQUALVERIFY 1 PICK FROMALTSTACK EQUALVERIFY FROMALTSTACK EQUALVERIFY DROP DROP DROP DROP DROP 1 EQUAL",
-                   is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_verify'])
+                   is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_verify', 'check_equalverify'])
     do_test_single("DUP INSPECTINPUTISSUANCE SIZE VERIFY TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK 1 INSPECTINPUTISSUANCE SIZE VERIFY 5 PICK FROMALTSTACK EQUALVERIFY 4 PICK FROMALTSTACK EQUAL NOT VERIFY 3 PICK FROMALTSTACK EQUALVERIFY 2 PICK FROMALTSTACK EQUALVERIFY 1 PICK FROMALTSTACK EQUALVERIFY FROMALTSTACK EQUALVERIFY DROP DROP DROP DROP DROP 1 EQUAL",
-                   is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_verify'])
+                   is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_verify', 'check_equalverify'])
     do_test_single("DUP INSPECTINPUTISSUANCE SIZE VERIFY TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK 1 INSPECTINPUTISSUANCE SIZE VERIFY 5 PICK FROMALTSTACK EQUALVERIFY 4 PICK FROMALTSTACK EQUALVERIFY 3 PICK FROMALTSTACK EQUAL NOT VERIFY 2 PICK FROMALTSTACK EQUALVERIFY 1 PICK FROMALTSTACK EQUALVERIFY FROMALTSTACK EQUALVERIFY DROP DROP DROP DROP DROP 1 EQUAL",
-                   is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_verify'])
+                   is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_verify', 'check_equalverify'])
     do_test_single("DUP INSPECTINPUTISSUANCE SIZE VERIFY TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK 1 INSPECTINPUTISSUANCE SIZE VERIFY 5 PICK FROMALTSTACK EQUALVERIFY 4 PICK FROMALTSTACK EQUALVERIFY 3 PICK FROMALTSTACK EQUALVERIFY 2 PICK FROMALTSTACK EQUAL NOT VERIFY 1 PICK FROMALTSTACK EQUALVERIFY FROMALTSTACK EQUALVERIFY DROP DROP DROP DROP DROP 1 EQUAL",
-                   is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_verify'])
+                   is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_verify', 'check_equalverify'])
     do_test_single("DUP INSPECTINPUTISSUANCE SIZE VERIFY TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK 1 INSPECTINPUTISSUANCE SIZE VERIFY 5 PICK FROMALTSTACK EQUALVERIFY 4 PICK FROMALTSTACK EQUALVERIFY 3 PICK FROMALTSTACK EQUALVERIFY 2 PICK FROMALTSTACK EQUALVERIFY 1 PICK FROMALTSTACK EQUAL NOT VERIFY FROMALTSTACK EQUALVERIFY DROP DROP DROP DROP DROP 1 EQUAL",
-                   is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_verify'])
+                   is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_verify', 'check_equalverify'])
     do_test_single("DUP INSPECTINPUTISSUANCE SIZE VERIFY TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK 1 INSPECTINPUTISSUANCE SIZE VERIFY 5 PICK FROMALTSTACK EQUALVERIFY 4 PICK FROMALTSTACK EQUALVERIFY 3 PICK FROMALTSTACK EQUALVERIFY 2 PICK FROMALTSTACK EQUALVERIFY 1 PICK FROMALTSTACK EQUALVERIFY FROMALTSTACK EQUAL NOT VERIFY DROP DROP DROP DROP DROP 1 EQUAL",
-                   is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_verify'])
+                   is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_verify', 'check_equalverify'])
 
     # explicit value 1 is ok for input
     do_test("inspectinputvalue 1 equalverify le64(1) equal",
