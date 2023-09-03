@@ -92,7 +92,7 @@ RELATED TO THIS SOFTWARE OR THIS LICENSE, UNDER ANY KIND OF LEGAL CLAIM.
 # NOTE: while types for values from z3 module are given, because at the
 # time of writing the z3 python module did not have typing, effectively
 # all z3 types are 'Any'. But when eventually z3 module would become typed,
-# we then can check and any problems that could be then detected
+# we then will be able to check the types without additional effort
 
 # pylama:ignore=E501,E272
 
@@ -983,6 +983,8 @@ class SymEnvironment:
 
         self._sym_ec_mul_scalar_fun: Optional['z3.Function'] = None
         self._sym_ec_tweak_add_fun: Optional['z3.Function'] = None
+        self._sym_checksig_fun: Optional['z3.Function'] = None
+        self._sym_checksigfromstack_fun: Optional['z3.Function'] = None
         self._sym_hashfun: dict[str, 'z3.FuncDeclRef'] = {}
         self._sym_bitfun8: dict[str, 'z3.FuncDeclRef'] = {}
         self._z3_tracked_assertion_lines: dict[str, int] = {}
@@ -1163,6 +1165,23 @@ class SymEnvironment:
         usageno = self._z3_tracked_assertion_lines.get(lineno_str, 0)
         self._z3_tracked_assertion_lines[lineno_str] = usageno+1
         return usageno
+
+    def get_sym_checksig_fun(self) -> 'z3.FuncDeclRef':
+        f = self._sym_checksig_fun
+        if f is None:
+            f = Function('checksig', IntSeqSortRef(), IntSeqSortRef(), IntSort(), IntSort())
+            self._sym_checksig_fun = f
+
+        return f
+
+    def get_sym_checksigfromstack_fun(self) -> 'z3.FuncDeclRef':
+        f = self._sym_checksigfromstack_fun
+        if f is None:
+            f = Function('checksigfromstack',
+                         IntSeqSortRef(), IntSeqSortRef(), IntSeqSortRef(), IntSort())
+            self._sym_checksigfromstack_fun = f
+
+        return f
 
     def get_sym_ec_mul_scalar_fun(self) -> 'z3.FuncDeclRef':
         f = self._sym_ec_mul_scalar_fun
@@ -1618,8 +1637,8 @@ err_sha256_context_too_short = failcode('sha256_context_too_short')
 err_sha256_context_too_long = failcode('sha256_context_too_long')
 err_invalid_sha256_context = failcode('invalid_sha256_context')
 err_int64_out_of_bounds = failcode('int64_out_of_bounds')
-err_ec_known_args_different_result = failcode('ec_known_args_different_result')
-err_ec_known_result_different_args = failcode('ec_known_result_different_args')
+err_known_args_different_result = failcode('known_args_different_result')
+err_known_result_different_args = failcode('known_result_different_args')
 
 
 class SymDataRType(enum.Enum):
@@ -2588,7 +2607,8 @@ def add_xonly_pubkey_constraints(vchPubKey: 'SymData', *,
 
 
 def add_ecdsa_sig_constraints(vchSig: Union['SymData', 'z3.ExprRef'], *,
-                              num_extra_bytes: int = 0) -> None:
+                              num_extra_bytes: int = 0
+                              ) -> Union[int, 'z3.ArithRef']:
     env = cur_env()
 
     sig: Union['z3.ExprRef', bytes]
@@ -2608,7 +2628,9 @@ def add_ecdsa_sig_constraints(vchSig: Union['SymData', 'z3.ExprRef'], *,
     is_sig_empty = (sig_size - num_extra_bytes == 0)
 
     if isinstance(is_sig_empty, bool) and is_sig_empty:
-        return
+        # assume SIGHASH_ALL for empty sig. This will result
+        # in this check: `0 == sym_checksig(<empty>, pub, 1)`
+        return 1
 
     Check(Or(is_sig_empty,
              And(sig_size >= 9, sig_size <= 73)),
@@ -2657,16 +2679,18 @@ def add_ecdsa_sig_constraints(vchSig: Union['SymData', 'z3.ExprRef'], *,
                      Implies(Length(seq_s) == 32, And(*check_exps)))),
               err_signature_low_s())
 
+    # If is_sig_empty is static and false, the function will return earlier
+    # therefore we don't need to check it here, because either sig is
+    # not empty, or it is not static, and indexed access to sig is symbolic
+    hash_type = sig[sig_size-1]
+
     if env.strictenc_flag:
-        # If is_sig_empty is static and false, the function will return earlier
-        # therefore we don't need to check it here, because either sig is
-        # not empty, or it is not static, and indexed access to sig is symbolic
         if env.is_elements and env.sigversion == SigVersion.TAPSCRIPT:
             # 0x40 is SIGHASH_RANGEPROOF
-            masked_hash_type = sig[sig_size-1] % 0x40
+            masked_hash_type = hash_type % 0x40
         else:
             # 0x80 is SIGHASH_ANYONECANPAY
-            masked_hash_type = sig[sig_size-1] % 0x80
+            masked_hash_type = hash_type % 0x80
 
         Check(Or(is_sig_empty,
                  masked_hash_type == 1,   # SIGHASH_ALL
@@ -2674,10 +2698,12 @@ def add_ecdsa_sig_constraints(vchSig: Union['SymData', 'z3.ExprRef'], *,
                  masked_hash_type == 3),  # SIGHASH_SINGLE
               err_signature_bad_hashtype())
 
+    return hash_type
+
 
 def add_schnorr_sig_constraints(vchSig: 'SymData',
                                 is_upgradeable_pub: Union[bool, 'z3.BoolRef']
-                                ) -> None:
+                                ) -> Union[int, 'z3.ArithRef']:
     env = cur_env()
 
     Check(Or(is_upgradeable_pub,
@@ -2692,10 +2718,11 @@ def add_schnorr_sig_constraints(vchSig: 'SymData',
                                   value_name='SchnorrScignature(...)')
 
     if vchSig.is_static and vchSig.Length() < 65:
-        masked_hash_type = 0
+        hash_type = 0
     else:
-        masked_hash_type = If(vchSig.Length() < 65,
-                              0, vchSig.as_ByteSeq()[64] % 0x80)
+        hash_type = If(vchSig.Length() < 65, 0, vchSig.as_ByteSeq()[64])
+
+    masked_hash_type = hash_type % 0x80
 
     Check(Or(is_upgradeable_pub,
              Implies(vchSig.Length() == 65,
@@ -2712,6 +2739,8 @@ def add_schnorr_sig_constraints(vchSig: 'SymData',
     else:
         assert not is_upgradeable_pub
 
+    return hash_type
+
 
 def add_amount_constraints(*, prefix: 'SymData', value: 'SymData',
                            ) -> None:
@@ -2727,6 +2756,64 @@ def add_amount_constraints(*, prefix: 'SymData', value: 'SymData',
                   And(le_signed_to_integer_exp(64, value.as_ByteSeq(), value.as_Int64()),
                       value.as_Int64() >= 0, value.as_Int64() <= MAX_MONEY)),
           err_out_of_money_range())
+
+
+def add_checksig_arg_constraints(vchSig: 'SymData',
+                                 vchPubKey: 'SymData',
+                                 htype: Union[int, 'z3.ExprRef'],
+                                 result: Union[int, 'z3.ExprRef']) -> None:
+    env = cur_env()
+
+    if not env.z3_enabled:
+        return
+
+    pub = vchPubKey.as_ByteSeq()
+
+    if env.sigversion == SigVersion.TAPSCRIPT:
+        sig = If(vchSig.Length() < 65,
+                 vchSig.as_ByteSeq(), Extract(vchSig.as_ByteSeq(), 0, 64))
+    else:
+        sig = If(vchSig.Length() == 0,
+                 vchSig.as_ByteSeq(),
+                 Extract(vchSig.as_ByteSeq(), 0, vchSig.Length()-1))
+
+    sym_checksig = env.get_sym_checksig_fun()
+
+    Check(result == sym_checksig(sig, pub, htype),
+          err_known_args_different_result())
+
+    sym_pub = FreshConst(IntSeqSortRef(), 'pub')
+    sym_htype = FreshInt('hashtype')
+    Check(z3.ForAll([sym_pub, sym_htype],
+                    Implies(result == sym_checksig(sig, sym_pub, sym_htype),
+                            And(sym_pub == pub, sym_htype == htype))),
+          err_known_result_different_args())
+
+
+def add_checksigfromstack_arg_constraints(
+    vchSig: 'SymData', vchData: 'SymData', vchPubKey: 'SymData',
+    result: Union[int, 'z3.ExprRef']
+) -> None:
+
+    env = cur_env()
+
+    if not env.z3_enabled:
+        return
+
+    sig = vchSig.as_ByteSeq()
+    data = vchData.as_ByteSeq()
+    pub = vchPubKey.as_ByteSeq()
+
+    sym_checksigfromstack = env.get_sym_checksigfromstack_fun()
+
+    Check(result == sym_checksigfromstack(sig, data, pub),
+          err_known_args_different_result())
+
+    sym_pub = FreshConst(IntSeqSortRef(), 'pub')
+    Check(z3.ForAll(sym_pub,
+                    Implies(result == sym_checksigfromstack(sig, data, sym_pub),
+                            sym_pub == pub)),
+          err_known_result_different_args())
 
 
 def add_scriptpubkey_constraints(*, witver: 'SymData', witprog: 'SymData'
@@ -6236,11 +6323,13 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
 
             if env.sigversion == SigVersion.TAPSCRIPT:
                 maybe_upgradeable_pub = add_xonly_pubkey_constraints(vchPubKey)
-                add_schnorr_sig_constraints(vchSig, maybe_upgradeable_pub)
+                htype = add_schnorr_sig_constraints(vchSig, maybe_upgradeable_pub)
             else:
-                add_ecdsa_sig_constraints(vchSig)
+                htype = add_ecdsa_sig_constraints(vchSig)
                 checksig_could_succeed = add_pubkey_constraints(vchPubKey)
                 Check(Implies(Not(checksig_could_succeed), r.as_Int() == 0))
+
+            add_checksig_arg_constraints(vchSig, vchPubKey, htype, r.as_Int())
 
             if env.nullfail_flag:
                 Check((vchSig.Length() == 0) == (r.as_Int() == 0),
@@ -6276,13 +6365,15 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
             vchPubKey.use_as_ByteSeq()
             r.use_as_Int()
 
-            maybe_upgradeable_pub = add_xonly_pubkey_constraints(vchPubKey)
-            add_schnorr_sig_constraints(vchSig, maybe_upgradeable_pub)
+            checksig_result = FreshInt('checksig_result')
 
-            Check(If(vchSig.Length() == 0,
-                     r.as_Int() == bn.as_Int(),
-                     Or(r.as_Int() == bn.as_Int(),
-                        r.as_Int() == bn.as_Int() + 1)))
+            maybe_upgradeable_pub = add_xonly_pubkey_constraints(vchPubKey)
+            htype = add_schnorr_sig_constraints(vchSig, maybe_upgradeable_pub)
+            add_checksig_arg_constraints(vchSig, vchPubKey, htype,
+                                         checksig_result)
+
+            Check(checksig_result == If(vchSig.Length() == 0, 0, 1))
+            Check(r.as_Int() == bn.as_Int() + checksig_result)
 
             popstack()
             popstack()
@@ -6479,6 +6570,9 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
 
                 checksig_could_succeed = add_pubkey_constraints(vchPubKey)
                 Check(Implies(Not(checksig_could_succeed), r.as_Int() == 0))
+
+            add_checksigfromstack_arg_constraints(
+                vchSig, vchData, vchPubKey, r.as_Int())
 
             Check(Implies(vchSig.Length() == 0, r.as_Int() == 0))
 
@@ -7350,7 +7444,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
 
             ec_mul_scalar = env.get_sym_ec_mul_scalar_fun()
             Check(b_res == ec_mul_scalar(b_gen, b_scalar),
-                  err_ec_known_args_different_result())
+                  err_known_args_different_result())
 
             if env.z3_enabled:
                 seq_a = FreshConst(IntSeqSortRef(), 'seq_a')
@@ -7359,7 +7453,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                     [seq_a, seq_b],
                     Implies(b_res == ec_mul_scalar(seq_a, seq_b),
                             And(seq_a == b_gen, seq_b == b_scalar))),
-                    err_ec_known_result_different_args())
+                    err_known_result_different_args())
 
             Check(r.as_Int() != 0, err_ecmultverify(),
                   enforcement_condition=r)
@@ -7403,7 +7497,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
             ec_tweak_add = env.get_sym_ec_tweak_add_fun()
 
             Check(b_tw_key == ec_tweak_add(b_int_key, b_tweak),
-                  err_ec_known_args_different_result())
+                  err_known_args_different_result())
 
             if env.z3_enabled:
                 seq_a = FreshConst(IntSeqSortRef(), 'seq_a')
@@ -7412,7 +7506,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                     [seq_a, seq_b],
                     Implies(b_tw_key == ec_tweak_add(seq_a, seq_b),
                             And(seq_a == b_int_key, seq_b == b_tweak))),
-                    err_ec_known_result_different_args())
+                    err_known_result_different_args())
 
             Check(r.as_Int() != 0, err_tweakverify(),
                   enforcement_condition=r)
