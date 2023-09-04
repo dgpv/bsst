@@ -398,12 +398,6 @@ def test() -> None:
     failures = do_test_single("0x304402203e4516da7253cf068effec6b95c41221c0cf3a8e6ccb8cbf1725b562e9afde2c02207FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A101 0x03d8bd1a69a1337d2817cfc0fecc3247436b34903d7ae424316354b73114dcb1dd CHECKSIG",
                               z3_enabled=False, num_successes=0, expect_failures=['check_signature_low_s', 'check_invalid_signature_length', 'check_invalid_signature_encoding'])
     assert 'check_signature_low_s' in failures
-    failures = do_test_single("DUP 0x03d8bd1a69a1337d2817cfc0fecc3247436b34903d7ae424316354b73114dcb1dd CHECKSIG SWAP 0x304502203e4516da7253cf068effec6b95c41221c0cf3a8e6ccb8cbf1725b562e9afde2c022100ab1e3da73d67e32045a20e0b999e049978ea8d6ee5480d485fcf2ce0d03b2ef001 EQUALVERIFY",
-                              z3_enabled=True, num_successes=0, expect_failures=['check_signature_low_s', 'check_invalid_signature_length', 'check_invalid_signature_encoding', 'check_equalverify'])
-    assert 'check_signature_low_s' in failures
-    failures = do_test_single("DUP 0x03d8bd1a69a1337d2817cfc0fecc3247436b34903d7ae424316354b73114dcb1dd CHECKSIG SWAP 0x304402203e4516da7253cf068effec6b95c41221c0cf3a8e6ccb8cbf1725b562e9afde2c02207FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A101 EQUALVERIFY",
-                              z3_enabled=True, num_successes=0, expect_failures=['check_signature_low_s', 'check_invalid_signature_length', 'check_invalid_signature_encoding', 'check_equalverify'])
-    assert 'check_signature_low_s' in failures
 
     do_test_single("DUP 0 BOOLOR SWAP 0 EQUALVERIFY",
                    z3_enabled=False, num_successes=1)
@@ -482,8 +476,6 @@ def test() -> None:
     do_test_single("DUP x('00') SWAP CAT SWAP x('0080') EQUALVERIFY DUP IF DUP ENDIF x('000080') XOR 0 RSHIFT NOT",
                    z3_enabled=True, num_successes=1, expect_failures=['check_branch_condition_invalid', 'check_equalverify', 'check_data_too_long'])
     do_test("SIZE 32 NUMEQUALVERIFY SWAP SIZE 50 NUMEQUALVERIFY x('3033021a') SWAP CAT SWAP x('02') SWAP CAT CHECKSIG")
-    do_test_single("SIZE 32 NUMEQUALVERIFY SWAP SIZE 50 NUMEQUALVERIFY x('3033020a') SWAP CAT SWAP x('02') SWAP CAT CHECKSIG",
-                   z3_enabled=True, num_successes=0, expect_failures=['check_equalverify', 'check_numequalverify', 'check_signature_low_s', 'check_invalid_signature_encoding', 'check_invalid_signature_length'])
     do_test('1 DEPTH DEPTH 3 EQUALVERIFY 2 EQUALVERIFY ADD')
     do_test('SIZE 0 EQUALVERIFY DUP CAT DUP CAT DUP CAT DUP CAT DUP CAT DUP CAT DUP CAT DUP CAT DUP CAT SIZE 0 NUMEQUALVERIFY NOT')
     do_test("DUP 2 RIGHT 'B' SWAP CAT SWAP 'ABCD' EQUALVERIFY 'BCD' EQUAL")

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import re
+import os
 import sys
 import json
 import random
@@ -364,6 +365,9 @@ def process_testcase_single(
                       valid_contexts[0].enforcements[0].cond.args[0].name == 'CHECKSIG' and
                       valid_contexts[0].enforcements[0].cond.args[0].args[0].name == '<witness_data_static_0>'):
                     pass
+                elif z3_enabled and expected_result == 'SIG_HIGH_S':
+                    # LOW_S is only supported for static signature data
+                    pass
                 else:
                     assert expected_result == 'INVALID_STACK_OPERATION'
                     assert len(ctx.used_witnesses) > 0
@@ -646,6 +650,9 @@ def test() -> None:
                 scriptSig=scriptSig, scriptPubKey=scriptPubKey,
                 flags=flags, comment=comment, expected_result=expected_result,
                 z3_only=z3_only)
+
+            if os.getenv('BSST_TESTS_NO_FLAGS_SHUFFLE'):
+                continue
 
             if expected_result == 'OK':
                 random.shuffle(flags)

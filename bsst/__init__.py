@@ -822,6 +822,7 @@ class SymEnvironment:
     @property
     def low_s_flag(self) -> bool:
         """SCRIPT_VERIFY_LOW_S
+        Only checked with statically-known signatures
         """
         if not self._is_for_usage_message:
             if self._is_miner:
@@ -2607,9 +2608,9 @@ def add_xonly_pubkey_constraints(vchPubKey: 'SymData', *,
     return maybe_upgradeable_pub
 
 
-def add_ecdsa_sig_constraints(vchSig: Union['SymData', 'z3.ExprRef'], *,
+def add_ecdsa_sig_constraints(vchSig: Union['SymData', 'z3.ExprRef'], *,  # noqa
                               num_extra_bytes: int = 0
-                              ) -> Union[int, 'z3.ArithRef']:
+                              ) -> tuple[Union[int, 'z3.ArithRef'], bool]:
     env = cur_env()
 
     sig: Union['z3.ExprRef', bytes]
@@ -2631,7 +2632,7 @@ def add_ecdsa_sig_constraints(vchSig: Union['SymData', 'z3.ExprRef'], *,
     if isinstance(is_sig_empty, bool) and is_sig_empty:
         # assume SIGHASH_ALL for empty sig. This will result
         # in this check: `0 == sym_checksig(<empty>, pub, 1)`
-        return 1
+        return 1, True
 
     Check(Or(is_sig_empty,
              And(sig_size >= 9, sig_size <= 73)),
@@ -2663,22 +2664,31 @@ def add_ecdsa_sig_constraints(vchSig: Union['SymData', 'z3.ExprRef'], *,
                                       sig[lenR + 7] < 0x80)))),
           err_invalid_signature_encoding())
 
-    if env.low_s_flag:
+    is_valid_R = True
+    is_valid_S = True
+    if isinstance(sig, bytes):
+        seq_r = Extract(sig, 4, lenR)
         seq_s = Extract(sig, 6+lenR, lenS)
-        max_s = 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0
 
-        check_exps: list[Union[bool, 'z3.BoolRef']] = []
+        if lenR > 32:
+            is_valid_R = all(b == 0 for b in seq_r[:lenR-32])
 
-        if not isinstance(seq_s, bytes) or len(seq_s) == 32:
+        if lenS > 32:
+            is_valid_S = all(b == 0 for b in seq_s[:lenS-32])
+
+        if env.low_s_flag and lenS >= 32:
+            Check(is_valid_S, err_signature_low_s())
+
+            max_s = 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0
+
+            seq_s = seq_s[lenS-32:]
             for i in range(32):
                 cmp_b = (max_s >> (8*(31-i))) & 0xFF
                 if cmp_b < 0xFF:
-                    check_exps.append(seq_s[i] <= cmp_b)
+                    if seq_s[i] < cmp_b:
+                        break
 
-        Check(Or(is_sig_empty,
-                 And(Length(seq_s) <= 32,
-                     Implies(Length(seq_s) == 32, And(*check_exps)))),
-              err_signature_low_s())
+                    Check(seq_s[i] == cmp_b, err_signature_low_s())
 
     # If is_sig_empty is static and false, the function will return earlier
     # therefore we don't need to check it here, because either sig is
@@ -2699,7 +2709,7 @@ def add_ecdsa_sig_constraints(vchSig: Union['SymData', 'z3.ExprRef'], *,
                  masked_hash_type == 3),  # SIGHASH_SINGLE
               err_signature_bad_hashtype())
 
-    return hash_type
+    return hash_type, is_valid_R and is_valid_S
 
 
 def add_schnorr_sig_constraints(vchSig: 'SymData',
@@ -6329,8 +6339,9 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                 maybe_upgradeable_pub = add_xonly_pubkey_constraints(vchPubKey)
                 htype = add_schnorr_sig_constraints(vchSig, maybe_upgradeable_pub)
             else:
-                htype = add_ecdsa_sig_constraints(vchSig)
-                checksig_could_succeed = add_pubkey_constraints(vchPubKey)
+                htype, is_valid_R_S = add_ecdsa_sig_constraints(vchSig)
+                checksig_could_succeed = And(is_valid_R_S,
+                                             add_pubkey_constraints(vchPubKey))
                 Check(Implies(Not(checksig_could_succeed), r.as_Int() == 0))
 
             add_checksig_arg_constraints(vchSig, vchPubKey, htype, r.as_Int())
@@ -6447,8 +6458,9 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                     sig = signatures[isig]
                     pub = pubkeys[ikey]
 
-                    add_ecdsa_sig_constraints(sig)
-                    checksig_could_succeed = And(add_pubkey_constraints(pub),
+                    _, is_valid_R_S = add_ecdsa_sig_constraints(sig)
+                    checksig_could_succeed = And(is_valid_R_S,
+                                                 add_pubkey_constraints(pub),
                                                  (sig.Length() != 0))
 
                     if not isinstance(checksig_could_succeed, bool) or \
@@ -6570,9 +6582,10 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                 else:
                     sig = Concat(vchSig.as_ByteSeq(), IntSeqVal(b'\x01'))
 
-                add_ecdsa_sig_constraints(sig, num_extra_bytes=1)
+                _, is_valid_R_S = add_ecdsa_sig_constraints(sig, num_extra_bytes=1)
 
-                checksig_could_succeed = add_pubkey_constraints(vchPubKey)
+                checksig_could_succeed = And(is_valid_R_S,
+                                             add_pubkey_constraints(vchPubKey))
                 Check(Implies(Not(checksig_could_succeed), r.as_Int() == 0))
 
             add_checksigfromstack_arg_constraints(

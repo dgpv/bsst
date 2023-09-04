@@ -183,6 +183,8 @@ of the script: `SCRIPT_VERIFY_SIGPUSHONLY`, `SCRIPT_VERIFY_CONST_SCRIPTCODE`,
 `SCRIPT_VERIFY_P2SH`, `SCRIPT_VERIFY_WITNESS`, `SCRIPT_VERIFY_TAPROOT` for all modes,
 and `SCRIPT_NO_SIGHASH_BYTE` for Elements mode.
 
+For `SCRIPT_VERIFY_LOW_S`, signatures are only checked if their data is known statically
+
 Script size limit is not modelled (the limit of 10000 bytes that exists for segwit and pre-segwit)
 
 ## No API except command line
@@ -521,6 +523,7 @@ without installing `bsst` python module.
   --low-s-flag=true
 
         SCRIPT_VERIFY_LOW_S
+        Only checked with statically-known signatures
 
   --nullfail-flag=true
 
