@@ -172,13 +172,19 @@ def test() -> None:
     assert 'check_known_result_different_args' in failures
 
     failures = do_test_single(f"0x{sig_schnorr.hex()} DUP TOALTSTACK 0x01 0x{xpub.hex()} CHECKSIGFROMSTACKVERIFY FROMALTSTACK 0x01 0x{xpub.hex()} CHECKSIGFROMSTACK NOT VERIFY",
-                              expect_failures=['check_known_args_different_result', 'check_checksigfromstackverify', 'check_verify'],
+                              expect_failures=['check_known_result_different_args', 'check_known_args_different_result', 'check_checksigfromstackverify', 'check_final_verify'],
                               num_successes=0, is_tapscript=True,
                               z3_enabled=True, nullfail_flag=False)
     assert 'check_known_args_different_result' in failures
 
     failures = do_test_single(f"0x{sig_schnorr.hex()} DUP TOALTSTACK 0x01 0x{xpub.hex()} CHECKSIGFROMSTACKVERIFY FROMALTSTACK 0x02 0x{xpub.hex()} CHECKSIGFROMSTACK",
                               expect_failures=['check_known_result_different_args', 'check_known_args_different_result', 'check_checksigfromstackverify', 'check_final_verify'],
+                              num_successes=0, is_tapscript=True,
+                              z3_enabled=True, nullfail_flag=False)
+    assert 'check_known_result_different_args' in failures
+
+    failures = do_test_single(f"2DUP TOALTSTACK TOALTSTACK 0x02 CAT SWAP 0 SWAP CHECKSIGADD FROMALTSTACK DUP 0x{xpub.hex()} EQUALVERIFY FROMALTSTACK DUP 0x{sig_schnorr.hex()} EQUALVERIFY 0x03 CAT ROT ROT CHECKSIGADD 1 EQUAL",
+                              expect_failures=['check_known_result_different_args', 'check_known_args_different_result', 'check_signature_bad_hashtype', 'check_invalid_signature_length', 'check_equalverify', 'check_final_verify'],
                               num_successes=0, is_tapscript=True,
                               z3_enabled=True, nullfail_flag=False)
     assert 'check_known_result_different_args' in failures
@@ -326,7 +332,7 @@ def test() -> None:
     do_test_single("DUP INSPECTINPUTVALUE TOALTSTACK TOALTSTACK 1 INSPECTINPUTVALUE SWAP FROMALTSTACK EQUAL NOT VERIFY FROMALTSTACK EQUALVERIFY 1 EQUAL",
                    is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_equalverify', 'check_verify'])
     do_test_single("DUP INSPECTINPUTVALUE TOALTSTACK TOALTSTACK 1 INSPECTINPUTVALUE SWAP FROMALTSTACK EQUALVERIFY FROMALTSTACK EQUAL NOT VERIFY 1 EQUAL",
-                   is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_equalverify', 'check_verify'])
+                   is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_equalverify', 'check_verify', 'check_scriptnum_minimal_encoding'])
 
     with CaptureStdout() as output:
         do_test_single("DUP INSPECTINPUTSCRIPTPUBKEY TOALTSTACK TOALTSTACK 1 INSPECTINPUTSCRIPTPUBKEY SWAP FROMALTSTACK EQUALVERIFY FROMALTSTACK EQUALVERIFY 1 EQUAL",

@@ -2813,9 +2813,10 @@ def add_checksigfromstack_arg_constraints(
           err_known_args_different_result())
 
     sym_pub = FreshConst(IntSeqSortRef(), 'pub')
-    Check(z3.ForAll(sym_pub,
-                    Implies(result == sym_checksigfromstack(sig, data, sym_pub),
-                            sym_pub == pub)),
+    sym_data = FreshConst(IntSeqSortRef(), 'data')
+    Check(z3.ForAll([sym_pub, sym_data],
+                    Implies(result == sym_checksigfromstack(sig, sym_data, sym_pub),
+                            And(sym_pub == pub, sym_data == data))),
           err_known_result_different_args())
 
 
