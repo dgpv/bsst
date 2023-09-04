@@ -426,10 +426,13 @@ def process_testcase_single(
                 or
                 f == 'check_invalid_pubkey'
                 for f in failures)
+        elif expected_result == 'SIG_HASHTYPE':
+            assert any(f in ('check_signature_bad_hashtype',
+                             'check_signature_explicit_sighash_all')
+                       for f in failures)
         elif expected_result == 'SIG_DER':
             assert any(f in ('check_invalid_signature_length',
-                             'check_invalid_signature_encoding',
-                             'check_signature_bad_hashtype')
+                             'check_invalid_signature_encoding')
                        for f in failures)
         elif expected_result == 'NULLFAIL':
             assert any(f == 'check_signature_nullfail' for f in failures)
