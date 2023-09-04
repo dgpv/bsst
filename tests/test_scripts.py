@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 
+import os
 import sys
 import struct
 from contextlib import contextmanager
 from typing import Generator, Iterable
 from io import StringIO
+
+from bitcointx.core.key import CKey, XOnlyPubKey
 
 import bsst
 
@@ -23,6 +26,7 @@ def CaptureStdout() -> Generator[StringIO, None, None]:
 @contextmanager
 def FreshEnv(*, z3_enabled: bool = False, is_tapscript: bool = False,
              assume_no_160bit_hash_collisions: bool = False,
+             nullfail_flag: bool = True,
              ) -> Generator[bsst.SymEnvironment, None, None]:
     env = bsst.SymEnvironment()
     env.is_elements = True
@@ -30,6 +34,7 @@ def FreshEnv(*, z3_enabled: bool = False, is_tapscript: bool = False,
     env.produce_model_values = False
     env.use_parallel_solving = False
     env.assume_no_160bit_hash_collisions = assume_no_160bit_hash_collisions
+    env.nullfail_flag = nullfail_flag
     if is_tapscript:
         env.sigversion = bsst.SigVersion.TAPSCRIPT
     else:
@@ -75,14 +80,16 @@ def do_test_single(script: str, *,
                    z3_enabled: bool = False, is_tapscript: bool = False,
                    assume_no_160bit_hash_collisions: bool = False,
                    expect_failures: Iterable[str] = (),
-                   num_successes: int = 1
+                   num_successes: int = 1,
+                   nullfail_flag: bool = True,
                    ) -> list[str]:
     print(f'script: {script}')
     print(f'z3_enabled: {z3_enabled}')
     print()
 
     with FreshEnv(z3_enabled=z3_enabled, is_tapscript=is_tapscript,
-                  assume_no_160bit_hash_collisions=assume_no_160bit_hash_collisions
+                  assume_no_160bit_hash_collisions=assume_no_160bit_hash_collisions,
+                  nullfail_flag=nullfail_flag
                   ) as env:
         (bsst.g_script_body,
          bsst.g_line_no_table,
@@ -119,6 +126,62 @@ def do_test(script: str, *,
 
 def test() -> None:
     out: str = ''
+
+    k = CKey.from_secret_bytes(os.urandom(32))
+    xpub = XOnlyPubKey(k.pub)
+    data = os.urandom(32)
+    sig_ecdsa = k.sign(data)
+    sig_schnorr = k.sign_schnorr_no_tweak(data)
+
+    do_test(f"0x{sig_ecdsa.hex()}01 DUP TOALTSTACK 0x{k.pub.hex()} CHECKSIGVERIFY FROMALTSTACK 0x{k.pub.hex()} CHECKSIG")
+    do_test(f"DUP 0x{sig_ecdsa.hex()}01 EQUALVERIFY DUP TOALTSTACK 0x{k.pub.hex()} CHECKSIGVERIFY FROMALTSTACK 0x{k.pub.hex()} CHECKSIG")
+    failures = do_test_single(f"DUP 0x{sig_schnorr.hex()}01 EQUALVERIFY DUP TOALTSTACK 0x{xpub.hex()} CHECKSIGVERIFY FROMALTSTACK 0x{xpub.hex()} CHECKSIG",
+                              is_tapscript=True, z3_enabled=False,
+                              expect_failures=['check_signature_explicit_sighash_all', 'check_equalverify', 'check_known_args_different_result', 'check_known_result_different_args'],
+                              num_successes=0)
+    assert 'check_signature_explicit_sighash_all' in failures
+    failures = do_test_single(f"DUP 0x{sig_schnorr.hex()}01 EQUALVERIFY DUP TOALTSTACK 0x{xpub.hex()} CHECKSIGVERIFY FROMALTSTACK 0x{xpub.hex()} CHECKSIG",
+                              is_tapscript=True, z3_enabled=True,
+                              expect_failures=['check_signature_explicit_sighash_all', 'check_equalverify', 'check_known_args_different_result', 'check_known_result_different_args'],
+                              num_successes=0)
+    assert 'check_signature_explicit_sighash_all' in failures
+
+    failures = do_test_single(f"0x{sig_ecdsa.hex()}01 DUP TOALTSTACK 0x{k.pub.hex()} CHECKSIGVERIFY FROMALTSTACK 0x{k.pub.hex()} CHECKSIG NOT VERIFY",
+                              expect_failures=['check_known_args_different_result', 'check_checksigverify', 'check_verify'],
+                              num_successes=0,
+                              z3_enabled=True, nullfail_flag=False)
+    assert 'check_known_args_different_result' in failures
+
+    failures = do_test_single(f"DUP 0x{sig_ecdsa.hex()}01 EQUALVERIFY DUP TOALTSTACK 0x{k.pub.hex()} CHECKSIGVERIFY FROMALTSTACK 0x{k.pub.hex()} CHECKSIG NOT VERIFY",
+                              expect_failures=['check_known_args_different_result', 'check_checksigverify', 'check_verify'],
+                              num_successes=0,
+                              z3_enabled=True, nullfail_flag=False)
+    assert 'check_known_args_different_result' in failures
+
+    failures = do_test_single(f"0x{sig_ecdsa.hex()}02 0x{k.pub.hex()} CHECKSIGVERIFY 0x{sig_ecdsa.hex()}01 0x{k.pub.hex()} CHECKSIG",
+                              expect_failures=['check_known_result_different_args', 'check_known_args_different_result', 'check_checksigverify', 'check_final_verify'],
+                              num_successes=0,
+                              z3_enabled=True, nullfail_flag=False)
+    assert 'check_known_result_different_args' in failures
+
+    failures = do_test_single(f"DUP 0x{sig_ecdsa.hex()}02 EQUALVERIFY 0x{k.pub.hex()} CHECKSIGVERIFY 0x{sig_ecdsa.hex()}01 0x{k.pub.hex()} CHECKSIG",
+                              expect_failures=['check_known_result_different_args', 'check_known_args_different_result', 'check_checksigverify', 'check_final_verify', 'check_equalverify',
+                                               'check_invalid_signature_encoding', 'check_invalid_signature_length', 'check_signature_low_s', 'check_signature_bad_hashtype'],
+                              num_successes=0,
+                              z3_enabled=True, nullfail_flag=False)
+    assert 'check_known_result_different_args' in failures
+
+    failures = do_test_single(f"0x{sig_schnorr.hex()} DUP TOALTSTACK 0x01 0x{xpub.hex()} CHECKSIGFROMSTACKVERIFY FROMALTSTACK 0x01 0x{xpub.hex()} CHECKSIGFROMSTACK NOT VERIFY",
+                              expect_failures=['check_known_args_different_result', 'check_checksigfromstackverify', 'check_verify'],
+                              num_successes=0, is_tapscript=True,
+                              z3_enabled=True, nullfail_flag=False)
+    assert 'check_known_args_different_result' in failures
+
+    failures = do_test_single(f"0x{sig_schnorr.hex()} DUP TOALTSTACK 0x01 0x{xpub.hex()} CHECKSIGFROMSTACKVERIFY FROMALTSTACK 0x02 0x{xpub.hex()} CHECKSIGFROMSTACK",
+                              expect_failures=['check_known_result_different_args', 'check_known_args_different_result', 'check_checksigfromstackverify', 'check_final_verify'],
+                              num_successes=0, is_tapscript=True,
+                              z3_enabled=True, nullfail_flag=False)
+    assert 'check_known_result_different_args' in failures
 
     do_test("TXWEIGHT 4000000 EQUAL", is_tapscript=True)
     failures = do_test_single("TXWEIGHT 4000001 EQUAL",

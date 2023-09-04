@@ -1623,6 +1623,7 @@ err_invalid_scalar_length = failcode('invalid_scalar_length')
 err_invalid_signature_encoding = failcode('invalid_signature_encoding')
 err_signature_low_s = failcode('signature_low_s')
 err_signature_bad_hashtype = failcode('signature_bad_hashtype')
+err_signature_explicit_sighash_all = failcode('signature_explicit_sighash_all')
 err_signature_nullfail = failcode('signature_nullfail')
 err_checksigverify = failcode('checksigverify')
 err_checkmultisigverify = failcode('checkmultisigverify')
@@ -2718,9 +2719,11 @@ def add_schnorr_sig_constraints(vchSig: 'SymData',
                                   value_name='SchnorrScignature(...)')
 
     if vchSig.is_static and vchSig.Length() < 65:
-        hash_type = 0
+        hash_type = 1
     else:
-        hash_type = If(vchSig.Length() < 65, 0, vchSig.as_ByteSeq()[64])
+        hash_type = If(vchSig.Length() < 65, 1, vchSig.as_ByteSeq()[64])
+        Check(Or(vchSig.Length() < 65, hash_type != 1),
+              err_signature_explicit_sighash_all())
 
     masked_hash_type = hash_type % 0x80
 
