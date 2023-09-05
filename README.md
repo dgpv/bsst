@@ -392,12 +392,12 @@ without installing `bsst` python module.
         If true, final result check will be skipped, and
         `--cleanstack-flag` will be set to false
 
-  --restrict-data-identifier-names=true
+  --restrict-data-reference-names=true
 
-        If false, identifiers assigned to values in the script via
+        If false, named references to values in the script via
         specially-formatted comments will be unrestricted, except that
         apostrophe <<'>> is not allowed. Otherwise, these
-        identifiers will be checked to be valid python identifiers
+        names will be checked to be valid python identifiers
 
   --assume-no-160bit-hash-collisions=false
 

@@ -499,7 +499,7 @@ class SymEnvironment:
 
     @property
     def restrict_data_reference_names(self) -> bool:
-        """If false, named reference to values in the script via
+        """If false, named references to values in the script via
         specially-formatted comments will be unrestricted, except that
         apostrophe <<'>> is not allowed. Otherwise, these
         names will be checked to be valid python identifiers
