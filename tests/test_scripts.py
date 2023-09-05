@@ -171,7 +171,7 @@ def test() -> None:
                               z3_enabled=True, nullfail_flag=False)
     assert 'check_known_result_different_args' in failures
 
-    failures = do_test_single(f"0x{sig_schnorr.hex()} DUP TOALTSTACK 0x01 0x{xpub.hex()} CHECKSIGFROMSTACKVERIFY FROMALTSTACK 0x01 0x{xpub.hex()} CHECKSIGFROMSTACK NOT VERIFY",
+    failures = do_test_single(f"0x{sig_schnorr.hex()} DUP TOALTSTACK 0x01 0x{xpub.hex()} CHECKSIGFROMSTACKVERIFY FROMALTSTACK 0x01 0x{xpub.hex()} CHECKSIGFROMSTACK NOT",
                               expect_failures=['check_known_result_different_args', 'check_known_args_different_result', 'check_checksigfromstackverify', 'check_final_verify'],
                               num_successes=0, is_tapscript=True,
                               z3_enabled=True, nullfail_flag=False)

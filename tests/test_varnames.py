@@ -61,26 +61,26 @@ Enforced constraints per path:
 All valid paths:
 ----------------
 
-        BOOL(b1) @ 4:L5
-        BOOL(x) @ 8:L9
-        BOOL(b4) @ 24:L25
+        BOOL(&b1) @ 4:L5
+        BOOL(&x) @ 8:L9
+        BOOL(&b4) @ 24:L25
         1 @ END
 
 IF wit0 @ 9:L10 : True
 ----------------------
 
-        BOOL(z) @ 13:L14
+        BOOL(&z) @ 13:L14
 
 IF wit0 @ 9:L10 : False
 -----------------------
 
-        BOOL(b2) @ 18:L19
+        BOOL(&b2) @ 18:L19
 
-Where:
-------
+Data references:
+----------------
 	b1 = x = ADD(wit0, wit0)
-	b4 = ADD(b3, b3)
-	b3 = ADD(b2, b2)
+	b4 = ADD(&b3, &b3)
+	b3 = ADD(&b2, &b2)
 	b2 = z = ADD(wit1, wit1)
 
 ==================================
@@ -112,15 +112,15 @@ Enforced constraints per path:
 IF wit0 @ 0:L1 : True
 ---------------------
 
-        x @ END
+        &x @ END
 
 IF wit0 @ 0:L1 : False
 ----------------------
 
-        BOOL(x') @ END
+        BOOL(&x') @ END
 
-Where:
-------
+Data references:
+----------------
 	x = 1
 	x' = 2
 

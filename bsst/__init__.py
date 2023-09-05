@@ -498,17 +498,17 @@ class SymEnvironment:
         self._is_incomplete_script = value
 
     @property
-    def restrict_data_identifier_names(self) -> bool:
-        """If false, identifiers assigned to values in the script via
+    def restrict_data_reference_names(self) -> bool:
+        """If false, named reference to values in the script via
         specially-formatted comments will be unrestricted, except that
         apostrophe <<'>> is not allowed. Otherwise, these
-        identifiers will be checked to be valid python identifiers
+        names will be checked to be valid python identifiers
         """
-        return self._restrict_data_identifier_names
+        return self._restrict_data_reference_names
 
-    @restrict_data_identifier_names.setter
-    def restrict_data_identifier_names(self, value: bool) -> None:
-        self._restrict_data_identifier_names = value
+    @restrict_data_reference_names.setter
+    def restrict_data_reference_names(self, value: bool) -> None:
+        self._restrict_data_reference_names = value
 
     @property
     def assume_no_160bit_hash_collisions(self) -> bool:
@@ -944,7 +944,7 @@ class SymEnvironment:
         self._all_z3_assertions_are_tracked_assertions = False
         self._disable_error_code_tracking_with_z3 = False
         self._is_incomplete_script = False
-        self._restrict_data_identifier_names = True
+        self._restrict_data_reference_names = True
         self._assume_no_160bit_hash_collisions = False
         self._skip_immediately_failed_branches_on = (OP_VERIFY,)
         self._sigversion = SigVersion.TAPSCRIPT
@@ -1354,14 +1354,14 @@ g_secp256k1_has_xonly_pubkeys = False
 
 g_is_in_processing = False
 
-g_do_process_data_identifier_names = False
+g_do_process_data_reference_names = False
 
 g_dummyexpr_counter = 0
 g_stack_symdata_index: int | None = None
 g_current_exec_context: Optional['ExecContext'] = None
 g_current_op: Optional['OpCode'] = None
 g_skip_assertion_for_enforcement_condition: Optional[tuple['SymData', int]] = None
-g_data_identifiers: dict[str, 'SymData'] = {}
+g_data_references: dict[str, 'SymData'] = {}
 
 g_check_op_start_time = 0.0
 
@@ -1470,26 +1470,26 @@ class DummyExpr:
 @contextmanager
 def VarnamesDisplay(show_assignments: bool = False
                     ) -> Generator[None, None, None]:
-    global g_do_process_data_identifier_names
+    global g_do_process_data_reference_names
 
-    assert not g_do_process_data_identifier_names, \
+    assert not g_do_process_data_reference_names, \
         "no recursive calls to VarnamesDisplay"
 
-    g_do_process_data_identifier_names = True
-    g_data_identifier_names_table.clear()
+    g_do_process_data_reference_names = True
+    g_data_reference_names_table.clear()
 
     env = cur_env()
 
     try:
         yield
-        if g_data_identifier_names_table and show_assignments:
+        if g_data_reference_names_table and show_assignments:
             env.ensure_empty_line()
-            env.write_line('Where:')
-            env.write_line('------')
-            data_identifier_names_show()
+            env.write_line('Data references:')
+            env.write_line('----------------')
+            data_reference_names_show()
     finally:
-        g_do_process_data_identifier_names = False
-        g_data_identifier_names_table.clear()
+        g_do_process_data_reference_names = False
+        g_data_reference_names_table.clear()
 
 
 class FailureCodeDispatcher:
@@ -3231,7 +3231,7 @@ class ScriptData:
 g_script_body: tuple[Union[OpCode, 'ScriptData'], ...] = ()
 g_line_no_table: list[int] = []
 g_var_save_positions: dict[int, str] = {}
-g_data_identifier_names_table: dict[str, dict[str, tuple['SymData', 'ExecContext']]] = {}
+g_data_reference_names_table: dict[str, dict[str, tuple['SymData', 'ExecContext']]] = {}
 g_seen_named_values: set[str] = set()
 
 
@@ -3537,14 +3537,14 @@ class Branchpoint:
                                 p2: tuple[SymData, ExecContext]) -> None:
             d1, c1 = p1
             d2, c2 = p2
-            if d1._data_identifier != d2._data_identifier:
-                if d1._data_identifier is None:
-                    d1._data_identifier = d2._data_identifier
-                elif d2._data_identifier is None:
-                    d2._data_identifier = d1._data_identifier
+            if d1._data_reference != d2._data_reference:
+                if d1._data_reference is None:
+                    d1._data_reference = d2._data_reference
+                elif d2._data_reference is None:
+                    d2._data_reference = d1._data_reference
                 else:
-                    d2._data_identifier_aliases.add(d1._data_identifier)
-                    d1._data_identifier_aliases.add(d2._data_identifier)
+                    d2._data_reference_aliases.add(d1._data_reference)
+                    d1._data_reference_aliases.add(d2._data_reference)
 
             assert len(d1._args) == len(d2._args)
             for idx in range(len(d1._args)):
@@ -4416,9 +4416,9 @@ class IntLE64(bytes):
 
 class SymData:
     _args: tuple['SymData', ...] = ()
-    _data_identifier: str | None = None
-    _data_identifier_was_reset: bool = False
-    _data_identifier_aliases: set[str]
+    _data_reference: str | None = None
+    _data_reference_was_reset: bool = False
+    _data_reference_aliases: set[str]
     _unique_name: str
 
     _Int: Optional['z3.ArithRef'] = None
@@ -4447,7 +4447,7 @@ class SymData:
 
         self._name = name
         self._wit_no = witness_number
-        self._data_identifier_aliases = set()
+        self._data_reference_aliases = set()
 
         ctx = cur_context()
         pc = ctx.pc
@@ -4603,20 +4603,20 @@ class SymData:
         if update_solver:
             self.update_solver_for_constrained_value(cv)
 
-    def set_data_identifier(self, data_identifier: str) -> None:
-        if self._data_identifier is not None or self._data_identifier_was_reset:
-            if not self._data_identifier_was_reset:
+    def set_data_reference(self, data_reference: str) -> None:
+        if self._data_reference is not None or self._data_reference_was_reset:
+            if not self._data_reference_was_reset:
                 ctx = cur_context()
                 ctx.warnings.append(
                     (ctx.pc,
-                     f'Tried to replace data_identifier {self._data_identifier} with data_identifier '
-                     f'{data_identifier} at {op_pos_info(ctx.pc)}, data_identifier is reset to '
+                     f'Tried to replace data_reference {self._data_reference} with data_reference '
+                     f'{data_reference} at {op_pos_info(ctx.pc)}, data_reference is reset to '
                      f'empty, to prevent confusion'))
-                self._data_identifier_was_reset = True
+                self._data_reference_was_reset = True
 
-            self._data_identifier = None
+            self._data_reference = None
         else:
-            self._data_identifier = data_identifier
+            self._data_reference = data_reference
 
     @property
     def is_static(self) -> bool:
@@ -4657,35 +4657,36 @@ class SymData:
 
         non_static_value_error('cannot be represented as bytes')
 
-    def _maybe_data_identifier(self) -> str | None:
-        if not g_do_process_data_identifier_names:
+    def _maybe_data_reference(self) -> str | None:
+        if not g_do_process_data_reference_names:
             return None
 
         if self._unique_name in g_seen_named_values:
             return None
 
-        data_identifier = self._data_identifier
-        if data_identifier is not None:
+        data_reference = self._data_reference
+        if data_reference is None:
+            return None
 
-            cr = self.canonical_repr()
-            for did in ([data_identifier] + list(self._data_identifier_aliases)):
-                while True:
-                    for other_cr, other_entry in g_data_identifier_names_table.items():
-                        if other_cr != cr and did in other_entry:
-                            did_altname = f"{did}'"
-                            if did == data_identifier:
-                                data_identifier = did_altname
+        cr = self.canonical_repr()
+        for dr in ([data_reference] + list(self._data_reference_aliases)):
+            while True:
+                for other_cr, other_entry in g_data_reference_names_table.items():
+                    if other_cr != cr and dr in other_entry:
+                        did_altname = f"{dr}'"
+                        if dr == data_reference:
+                            data_reference = did_altname
 
-                            did = did_altname
-                            break
-                    else:
+                        dr = did_altname
                         break
+                else:
+                    break
 
-                entry = g_data_identifier_names_table.get(cr, {})
-                entry[did] = (self, cur_context())
-                g_data_identifier_names_table[cr] = entry
+            entry = g_data_reference_names_table.get(cr, {})
+            entry[dr] = (self, cur_context())
+            g_data_reference_names_table[cr] = entry
 
-        return data_identifier
+        return f'&{data_reference}'
 
     def set_model_value(self, cv: Optional[ConstrainedValue]) -> None:
         if cv is None:
@@ -4741,8 +4742,8 @@ class SymData:
         return self.readable_repr()
 
     def readable_repr(self, with_name: str = '') -> str:  # noqa
-        if did := self._maybe_data_identifier():
-            return did
+        if dr := self._maybe_data_reference():
+            return dr
 
         name = with_name or self._name or '_'
 
@@ -5198,8 +5199,8 @@ class SymDepth(SymData):
         return self._unique_name
 
     def __repr__(self) -> str:
-        if did := self._maybe_data_identifier():
-            return did
+        if dr := self._maybe_data_reference():
+            return dr
 
         if cur_context().is_finalized:
             result_str = f'{self._name}:{self.depth}'
@@ -5371,8 +5372,8 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
 
             data = SymData(name=sd.name, static_value=sd.value)
             if sd.name and sd.name.startswith('$'):
-                if sd.name not in g_data_identifiers:
-                    g_data_identifiers[sd.name] = data
+                if sd.name not in g_data_references:
+                    g_data_references[sd.name] = data
 
             push(data)
 
@@ -7613,9 +7614,9 @@ def symex_script() -> None:  # noqa
             num_pre_op_used_witnesses = len(ctx.used_witnesses)
 
             if symex_op(ctx, op_or_sd):
-                if data_identifier := g_var_save_positions.get(ctx.pc):
+                if data_reference := g_var_save_positions.get(ctx.pc):
                     if len(ctx.stack) > 0:
-                        ctx.stack[-1].set_data_identifier(data_identifier)
+                        ctx.stack[-1].set_data_reference(data_reference)
 
                 num_new_witnesses = len(ctx.used_witnesses) - num_pre_op_used_witnesses
                 assert num_new_witnesses >= 0
@@ -7653,7 +7654,7 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
     line_no_table: list[int] = []
     var_save_positions: dict[int, str] = {}
 
-    seen_data_identifier_names: dict[str, int] = {}
+    seen_data_reference_names: dict[str, int] = {}
 
     line_no = -1
 
@@ -7666,16 +7667,13 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
             sys.stderr.write(f'ERROR at line {line_no}: {msg}\n')
             sys.exit(-1)
 
-        data_identifier = ''
+        data_reference = ''
         # remove '//' comments
         if m := re.search('//', line):
             comment = line[m.end():]
             line = line[:m.start()]
             if m := re.match('\\s*=>(\\S+)', comment):
-                data_identifier = m.group(1)
-                if re.match('wit\\d+', data_identifier) or \
-                        data_identifier.startswith('tx_'):
-                    die(f'reserved data_identifier {data_identifier} was used at line {line_no}')
+                data_reference = m.group(1)
 
         for op_str in line.split():
             got_angle_brackets = False
@@ -7772,24 +7770,24 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
             line_no_table.append(line_no)
             opcodes.append(op)
 
-        if data_identifier and env.restrict_data_identifier_names:
-            if data_identifier and not data_identifier.isidentifier():
+        if data_reference and env.restrict_data_reference_names:
+            if data_reference and not data_reference.isidentifier():
                 sys.stderr.write(
-                    f"NOTE: non-identifier data_identifier is ignored on input line "
+                    f"NOTE: non-identifier data_reference is ignored on input line "
                     f"{line_no}\n")
-                data_identifier = ''
+                data_reference = ''
 
-        if data_identifier:
-            if data_identifier in seen_data_identifier_names:
-                die(f'data_identifier at line {line_no} was already used at line '
-                    f'{seen_data_identifier_names[data_identifier]}')
+        if data_reference:
+            if data_reference in seen_data_reference_names:
+                die(f'data_reference at line {line_no} was already used at line '
+                    f'{seen_data_reference_names[data_reference]}')
 
-            if "'" in data_identifier:
-                die("apostrophe <<'>> is not allowed in data identifier names")
+            if "'" in data_reference:
+                die("apostrophe <<'>> is not allowed in data reference names")
 
-            seen_data_identifier_names[data_identifier] = line_no
+            seen_data_reference_names[data_reference] = line_no
 
-            var_save_positions[len(opcodes)-1] = data_identifier
+            var_save_positions[len(opcodes)-1] = data_reference
 
     line_no_table.append(line_no+1)
 
@@ -7884,7 +7882,7 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
             txval.update_model_values_request_dict(mvdict_req, mvnamemap)
             processed.append(txval)
 
-        for val in g_data_identifiers.values():
+        for val in g_data_references.values():
             if val not in processed:
                 val.update_model_values_request_dict(mvdict_req, mvnamemap)
                 processed.append(val)
@@ -7963,7 +7961,7 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
     txvalues = ctx.tx.values()
     got_model_values = (env.produce_model_values and
                         (ctx.used_witnesses or txvalues or ctx.stack
-                         or g_data_identifiers))
+                         or g_data_references))
 
     if env.produce_model_values:
 
@@ -7985,7 +7983,7 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
             txval.check_only_one_value_possible()
             processed.append(txval)
 
-        for val in g_data_identifiers.values():
+        for val in g_data_references.values():
             if val in processed:
                 env.write_line(f'skip checking {val}: already checked')
             else:
@@ -8029,40 +8027,40 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
         z3_pop_context()
 
 
-def data_identifier_names_show() -> None:
+def data_reference_names_show() -> None:
 
     g_seen_named_values.clear()
 
-    seen_data_identifier_names: set[str] = set()
+    seen_data_reference_names: set[str] = set()
 
-    def get_data_identifier_names_rec() -> list[tuple[list[str], str]]:
+    def get_data_reference_names_rec() -> list[tuple[list[str], str]]:
         result: list[tuple[list[str], str]] = []
-        did_copy = g_data_identifier_names_table.copy()
+        did_copy = g_data_reference_names_table.copy()
 
         for _, vndict in did_copy.items():
-            data_identifier_names: list[str] = []
-            for did, (value, ctx) in vndict.items():
-                if did not in seen_data_identifier_names:
-                    data_identifier_names.append(did)
+            data_reference_names: list[str] = []
+            for dr, (value, ctx) in vndict.items():
+                if dr not in seen_data_reference_names:
+                    data_reference_names.append(dr)
 
                 g_seen_named_values.add(value.unique_name)
 
-            g_data_identifier_names_table.clear()
+            g_data_reference_names_table.clear()
 
-            if data_identifier_names:
+            if data_reference_names:
                 with CurrentExecContext(ctx):
-                    result.append((data_identifier_names, repr(value)))
-                    seen_data_identifier_names.update(data_identifier_names)
+                    result.append((data_reference_names, repr(value)))
+                    seen_data_reference_names.update(data_reference_names)
 
-            result.extend(get_data_identifier_names_rec())
+            result.extend(get_data_reference_names_rec())
 
         g_seen_named_values.clear()
-        g_data_identifier_names_table.clear()
+        g_data_reference_names_table.clear()
 
         return result
 
-    for data_identifier_names, val in get_data_identifier_names_rec():
-        cur_env().write_line(f'\t{" = ".join(data_identifier_names)} = {val}')
+    for data_reference_names, val in get_data_reference_names_rec():
+        cur_env().write_line(f'\t{" = ".join(data_reference_names)} = {val}')
 
 
 def print_as_header(lines_or_str: str | Iterable[str], level: int = 0,
@@ -8163,7 +8161,7 @@ def report() -> None:  # noqa
                 for txval in txvalues:
                     mvals_list.append(f'{txval} {get_val_str(txval)}')
 
-                for vname, val in g_data_identifiers.items():
+                for vname, val in g_data_references.items():
                     mvals_list.append(f'{vname} {get_val_str(val)}')
 
             else:

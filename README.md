@@ -81,15 +81,13 @@ Identifiers starting with `$` are recognized as data placeholders: `$some_var`
 A special format of comment is recoginzed:
 
 `OP_ADD // =>add_result` will mark the value on the stack after `OP_ADD` with
-the identifier `add_result`, and this identifier will be used in the report.
-There should be no whitespace between `=>` and the identifier. There may be
+the identifier `add_result`, and this reference will be used in the report.
+There should be no whitespace between `=>` and the reference identifier. There may be
 whitespace between `//` and `=>`, but nothing other than whitespace. In the case when
-different code paths result in different values assigned to the same identifier,
+different code paths result in different values assigned to the same reference identifier,
 an apostrophe <<'>> will be appended to the identifier with different value.
 
-Data identifiers that start with `tx_` are reserved for transaction fields
-
-Data identifiers that start with `wit<D>` where `<D>` is a digit, are reserved for witnesses
+The data reference identifiers will be prepended with `&` in the report
 
 ## Reports
 
