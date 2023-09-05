@@ -33,8 +33,7 @@ def exec_opcode(
         val = phf.stacktop(-1)
         r = bsst.SymData(name=op.name, args=(val,))
 
-        if val.is_static:
-            r.set_static(val.use_as_Int() + 42)
+        r.set_as_Int(val.use_as_Int() + 42)
 
         phf.popstack()
         phf.push(r)
