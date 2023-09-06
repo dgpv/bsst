@@ -1,5 +1,6 @@
 # B'SST release notes
-Version 0.1.0.dev0:
+
+Version 0.1.1:
 
 * Fixed a bug with number of used witnesses shown incorrectly in the report when Z3 is disabled
 
