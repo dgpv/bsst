@@ -2798,7 +2798,8 @@ def add_checksig_arg_constraints(vchSig: 'SymData',
     sym_pub = FreshConst(IntSeqSortRef(), 'pub')
     sym_htype = FreshInt('hashtype')
     Check(z3.ForAll([sym_pub, sym_htype],
-                    Implies(result == sym_checksig(sig, sym_pub, sym_htype),
+                    Implies(And(result == 1,
+                                1 == sym_checksig(sig, sym_pub, sym_htype)),
                             And(sym_pub == pub, sym_htype == htype))),
           err_known_result_different_args())
 
@@ -2825,7 +2826,8 @@ def add_checksigfromstack_arg_constraints(
     sym_pub = FreshConst(IntSeqSortRef(), 'pub')
     sym_data = FreshConst(IntSeqSortRef(), 'data')
     Check(z3.ForAll([sym_pub, sym_data],
-                    Implies(result == sym_checksigfromstack(sig, sym_data, sym_pub),
+                    Implies(And(result == 1,
+                                1 == sym_checksigfromstack(sig, sym_data, sym_pub)),
                             And(sym_pub == pub, sym_data == data))),
           err_known_result_different_args())
 

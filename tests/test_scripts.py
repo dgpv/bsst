@@ -115,13 +115,16 @@ def do_test_single(script: str, *,
 def do_test(script: str, *,
             expect_failures: Iterable[str] = (),
             num_successes: int = 1,
-            is_tapscript: bool = False) -> None:
+            is_tapscript: bool = False,
+            nullfail_flag: bool = False) -> None:
     do_test_single(script, z3_enabled=False,
                    is_tapscript=is_tapscript, expect_failures=expect_failures,
-                   num_successes=num_successes)
+                   num_successes=num_successes,
+                   nullfail_flag=nullfail_flag)
     do_test_single(script, z3_enabled=True,
                    is_tapscript=is_tapscript, expect_failures=expect_failures,
-                   num_successes=num_successes)
+                   num_successes=num_successes,
+                   nullfail_flag=nullfail_flag)
 
 
 def test() -> None:
@@ -135,6 +138,10 @@ def test() -> None:
 
     do_test(f"0x{sig_ecdsa.hex()}01 DUP TOALTSTACK 0x{k.pub.hex()} CHECKSIGVERIFY FROMALTSTACK 0x{k.pub.hex()} CHECKSIG")
     do_test(f"DUP 0x{sig_ecdsa.hex()}01 EQUALVERIFY DUP TOALTSTACK 0x{k.pub.hex()} CHECKSIGVERIFY FROMALTSTACK 0x{k.pub.hex()} CHECKSIG")
+    do_test(f"DUP 0x{sig_ecdsa.hex()} EQUALVERIFY DUP TOALTSTACK 0x01 CAT 0x{k.pub.hex()} CHECKSIG NOT VERIFY FROMALTSTACK 0x02 CAT 0x{k.pub.hex()} CHECKSIG",
+            nullfail_flag=False)
+    do_test(f"DUP 0x{sig_schnorr.hex()} EQUALVERIFY DUP TOALTSTACK 0x01 0x{xpub.hex()} CHECKSIGFROMSTACK NOT VERIFY FROMALTSTACK 0x02 0x{xpub.hex()} CHECKSIGFROMSTACK",
+            nullfail_flag=False, is_tapscript=True)
     failures = do_test_single(f"DUP 0x{sig_schnorr.hex()}01 EQUALVERIFY DUP TOALTSTACK 0x{xpub.hex()} CHECKSIGVERIFY FROMALTSTACK 0x{xpub.hex()} CHECKSIG",
                               is_tapscript=True, z3_enabled=False,
                               expect_failures=['check_signature_explicit_sighash_all', 'check_equalverify', 'check_known_args_different_result', 'check_known_result_different_args'],
@@ -239,7 +246,7 @@ def test() -> None:
 
     failures = do_test_single("PUSHCURRENTINPUTINDEX DUP INSPECTVERSION 0x02000000 EQUALVERIFY INSPECTINPUTSEQUENCE 0x000000ff EQUALVERIFY CHECKSEQUENCEVERIFY 1111 EQUAL",
                               is_tapscript=True, z3_enabled=True, num_successes=0,
-                              expect_failures=['check_nsequence_timelock_in_effect', 'check_nsequence_type_mismatch', 'check_equalverify', 'check_final_verify'])
+                              expect_failures=['check_nsequence_timelock_in_effect', 'check_nsequence_type_mismatch', 'check_equalverify', 'check_final_verify', 'check_scriptnum_minimal_encoding'])
     assert 'check_nsequence_timelock_in_effect' in failures
 
     with CaptureStdout() as output:
