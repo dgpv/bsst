@@ -149,7 +149,7 @@ def test() -> None:
     assert 'check_signature_explicit_sighash_all' in failures
     failures = do_test_single(f"DUP 0x{sig_schnorr.hex()}01 EQUALVERIFY DUP TOALTSTACK 0x{xpub.hex()} CHECKSIGVERIFY FROMALTSTACK 0x{xpub.hex()} CHECKSIG",
                               is_tapscript=True, z3_enabled=True,
-                              expect_failures=['check_signature_explicit_sighash_all', 'check_equalverify', 'check_known_args_different_result', 'check_known_result_different_args'],
+                              expect_failures=['check_signature_explicit_sighash_all', 'check_equalverify', 'check_known_args_different_result', 'check_known_result_different_args', 'check_checksigverify'],
                               num_successes=0)
     assert 'check_signature_explicit_sighash_all' in failures
 
