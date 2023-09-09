@@ -61,14 +61,15 @@ For B'SST to be able to use Z3 theorem prover, "z3-solver" python package
 
 For the analyzer to check validity of statically-known public keys,
 secp256k1 C library (https://github.com/bitcoin-core/secp256k1/) is needed.
-B'SST will attempt to find it with `ctypes.util.find_library` and thenload it
+B'SST will attempt to find it with `ctypes.util.find_library` and then load it
 using `ctypes.cdll.LoadLibrary`.
 
 ## Syntax
 
 Syntax parser is non-strict:
 
-* case-insensitive, `OP_ADD` is the same as `ADD`,
+* Case-insensitive
+* `OP_ADD` is the same as `ADD`,
 * The string `'data'` can be represented as: `'data'`, `x('64617461')`, or `0x64617461`.
 * Strings in quotes cannot contain whitespace, and can use only single quotes (`'`)
 * LE64 value 555 can be represented as `x('2b02000000000000')`, `0x2b02000000000000`, or `le64(555)`.
@@ -115,7 +116,7 @@ The reports show:
 * Warnings: possible issues dected while symbolically executing the script, that do not lead to script failure,
   but it is probably better to examine them and understand if they are problematic or not
 * Failures: Information on detected script failures, with opcode that might have caused the vailure, and stack contents
-  at the this opcode was executed
+  at the moment this opcode would be executed
 * Progress log: if `--log-progress` is `true`, the details of checking of 'always true' conditions for enforced constraints,
   and 'only one possible value' for model values will be reported - namely, the 'probable cause' of why the condition is
   deemed always true or only one possible value is found, will be printed.
@@ -123,10 +124,10 @@ The reports show:
 Some opcodes are abbreviated: `CHECKLOCKTIMEVERIFY` -> `CLTV`, `CHECKSEQUENCEVERIFY` -> `CSV`.
 For Elements mode, `'a' 'b' CAT` will be reported as `'a'.'b'`
 
-NOTE: Model values will satisfy restrictions imposed on them by opcodes, as modelled by B'SST.
-Since modelling is not perfect, sometimes incomplete, these values can still be invalid if used for execution
-of the script on "real" interpreter. For example, for ECDSA pubkeys only constraints on size and first byte are modelled,
-and model value can show arbitrary data for the rest of pubkey.
+NOTE: Model values are described as "possible" values in a sense that they satisfy restrictions imposed on them by opcodes,
+as modelled by B'SST. Since modelling is not perfect, sometimes incomplete, these values can still be invalid if used
+for execution of the script on "real" interpreter. For example, for ECDSA pubkeys only constraints on size and
+first byte are modelled, and model value can show arbitrary data for the rest of pubkey.
 
 NOTE: With Z3 enabled, failure report may give several possible causes for the failure. It does not mean that
 all of these conditions are a definite cause of this particular failure. Some of them may be false positives,
