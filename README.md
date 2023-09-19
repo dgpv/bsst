@@ -450,7 +450,7 @@ without installing `bsst` python module.
 
         Perform Z3 check after each opcode is symbolically executed.
         When true, analysis time for the whole script will likely be longer,
-        but might some failures might be detected faster. Also might give
+        but some failures might be detected faster. Also might give
         clearer reasons for paricular failure when the failure is detected
         right after the opcode rather than at the end of execution path
 
@@ -509,7 +509,7 @@ without installing `bsst` python module.
         SCRIPT_VERIFY_MINIMALDATA
 
         Immediate data values are subjected to checks:
-        `0x01 VERIFY` will fail, must use `--OP-1` (or just `--1`) instead
+        `0x01 VERIFY` will fail, must use `OP_1` (or just `1`) instead
 
         If true, `--minimaldata-flag` is implied to be true
 
@@ -517,7 +517,7 @@ without installing `bsst` python module.
 
         SCRIPT_VERIFY_NULLDUMMY
         If this flag is not set explicitly, it will be false with
-        `--sigversion=base`, and false otherwise
+        `--sigversion=base`, and true otherwise
 
   --low-s-flag=true
 
