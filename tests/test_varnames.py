@@ -124,16 +124,9 @@ Data references:
 	x = 1
 	x' = 2
 
-=======================
-Witness usage per path:
-=======================
-
-IF wit0 @ 0:L1 : True
----------------------
-Witnesses used: 1
-
-IF wit0 @ 0:L1 : False
-----------------------
+==================================
+Witness usage for all valid paths:
+==================================
 Witnesses used: 1
 
 """  # noqa

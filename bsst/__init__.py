@@ -8166,12 +8166,11 @@ def report() -> None:  # noqa
                 for vname, val in g_data_references.items():
                     mvals_list.append(f'{vname} {get_val_str(val)}')
 
+                for w in bp.context.used_witnesses:
+                    mvals_list.append(f'{w} {get_val_str(w)}')
             else:
                 def get_val_str(v: SymData) -> str:
-                    return f'= {v}'
-
-            for w in bp.context.used_witnesses:
-                mvals_list.append(f'{w} {get_val_str(w)}')
+                    return ': ?'
 
             stack_len = len(bp.context.stack)
             if not env.cleanstack_flag and stack_len > 0:
@@ -8187,10 +8186,8 @@ def report() -> None:  # noqa
                 if mvals_list:
                     mvals_list.append('')
 
-                if top in bp.context.used_witnesses:
-                    mvals_list.append(f'<result> = {top}')
-                else:
-                    mvals_list.append(f'<result> {get_val_str(top)}')
+                vname = '' if not top._name else f'= {top} '
+                mvals_list.append(f'<result> {vname}{get_val_str(top)}')
             else:
                 assert stack_len == 0
                 assert env.is_incomplete_script, \
@@ -8292,7 +8289,10 @@ def report() -> None:  # noqa
             env.ensure_empty_line()
 
             if env.produce_model_values or env.is_incomplete_script:
-                env.write_line('Model values:')
+                if not env.produce_model_values:
+                    env.write_line('Stack values:')
+                else:
+                    env.write_line('Model values:')
                 for ws in mvals:
                     env.write_line(f'\t{ws}')
 
