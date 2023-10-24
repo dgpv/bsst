@@ -97,7 +97,7 @@ def convert_script(line: str, flags: list[str],
         elif len(op_str) >= 2 and op_str[0] == "'" and op_str[-1] == "'":
             script_bytes.append(CScript([op_str[1:-1].encode('utf-8')]))
         else:
-            ops, _, _ = bsst.get_opcodes([maybe_subst_with_nop(op_str, flags)])
+            ops = bsst.get_opcodes([maybe_subst_with_nop(op_str, flags)]).body
             assert len(ops) == 1
             assert isinstance(ops[0], bsst.OpCode)
             script_bytes.append(CScript(bytes([ops[0].code])))
@@ -128,7 +128,7 @@ def convert_script(line: str, flags: list[str],
 
             script_lines.append(maybe_subst_with_nop(op_str, flags))
 
-    return bsst.get_opcodes(script_lines)[0]
+    return bsst.get_opcodes(script_lines).body
 
 
 supported_flags = {'DISCOURAGE_UPGRADEABLE_PUBKEY_TYPE', 'STRICTENC',
@@ -182,13 +182,15 @@ def process_contexts(env: bsst.SymEnvironment) -> None:
 
 def set_script_body(script_body: tuple[bsst.OpCode | bsst.ScriptData, ...]
                     ) -> None:
-    bsst.g_script_body = script_body
-    bsst.g_var_save_positions = {}
-    bsst.g_line_no_table = []
-    for pc in range(len(bsst.g_script_body)):
-        bsst.g_line_no_table.append(pc)
+    line_no_table = []
+    for pc in range(len(script_body)):
+        line_no_table.append(pc)
 
-    bsst.g_line_no_table.append(len(bsst.g_script_body))
+    line_no_table.append(len(script_body))
+
+    env = bsst.cur_env()
+    env.script_info = bsst.ScriptInfo(body=script_body,
+                                      line_no_table=line_no_table)
 
 
 def process_testcase_single(
@@ -202,8 +204,6 @@ def process_testcase_single(
     use_nonstatic_witnesses: bool = False,
     flags_were_altered: bool = False
 ) -> None:
-    set_script_body(scriptPubKey)
-
     if use_nonstatic_witnesses:
         assert z3_enabled
 
@@ -216,6 +216,7 @@ def process_testcase_single(
         assert scriptPubKey[2] == bsst.OP_EQUAL
 
     with FreshEnv(z3_enabled=z3_enabled) as env:
+        set_script_body(scriptPubKey)
         common_env_settings(env, flags)
         env.z3_enabled = z3_enabled
         env.do_progressive_z3_checks = True
@@ -246,9 +247,7 @@ def process_testcase_single(
             data.increase_refcount()
 
         try:
-            bsst.g_is_in_processing = True
             bsst.symex_script()
-            bsst.g_is_in_processing = False
         except ValueError as e:
             if str(e).startswith('non-static value:'):
                 if expected_result == 'INVALID_STACK_OPERATION':
@@ -345,7 +344,7 @@ def process_testcase_single(
                         pass
                 elif expected_result == 'UNBALANCED_CONDITIONAL':
                     assert (
-                        bsst.g_script_body[ctx.used_witnesses[0].src_pc]
+                        env.script_info.body[ctx.used_witnesses[0].src_pc]
                         in (bsst.OP_IF, bsst.OP_NOTIF)
                     )
                 elif (expected_result == 'UNSATISFIED_LOCKTIME' and
@@ -402,16 +401,16 @@ def process_testcase_single(
                     (len(invalid_contexts) == 1 and
                      len(failures) == 1 and
                      ((failures[0] == 'check_length_mismatch' and
-                       bsst.g_script_body[invalid_contexts[0].pc] in (bsst.OP_AND,
-                                                                      bsst.OP_OR))
+                       env.script_info.body[invalid_contexts[0].pc] in (bsst.OP_AND,
+                                                                        bsst.OP_OR))
                       or
                       (failures[0] in ('check_negative_argument',
                                        'check_argument_above_bounds')
                        and
-                       bsst.g_script_body[invalid_contexts[0].pc] in (bsst.OP_SUBSTR,))
+                       env.script_info.body[invalid_contexts[0].pc] in (bsst.OP_SUBSTR,))
                       or
                       (failures[0] == 'check_data_too_long' and
-                       bsst.g_script_body[invalid_contexts[0].pc] in (bsst.OP_CAT,)))))
+                       env.script_info.body[invalid_contexts[0].pc] in (bsst.OP_CAT,)))))
         elif expected_result == 'PUSH_SIZE':
             assert any(f == 'check_data_too_long' for f in failures)
         elif expected_result == 'OP_COUNT':
@@ -496,16 +495,14 @@ def process_testcase(
     clean_contexts()
 
     if scriptSig:
-        set_script_body(scriptSig)
         with FreshEnv() as env:
+            set_script_body(scriptSig)
             common_env_settings(env, flags)
             env.is_incomplete_script = True
 
             print("Sym-exec SSig")
 
-            bsst.g_is_in_processing = True
             bsst.symex_script()
-            bsst.g_is_in_processing = False
             bsst.report()
             sys.stdout.flush()
 

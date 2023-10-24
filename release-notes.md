@@ -2,8 +2,11 @@
 
 Version 0.1.2.dev0:
 
-* Fix: scriptnum decoding was not imposing "0 >= x => 255" bound on the byte sequence if its size was 1.
-  This was causing problems with `bsst-assume` tests, but likely that this could have caused problems elsewhere, too
+* Add ability to set assertions on stack values and witnesses, and assumptions for data placeholders. Please see newly added "Assertions" and "Assumptions" sections in README. You might also look at `tests/test_assertions_and_assumptions.py` for examples of usage
+
+* Fix: scriptnum decoding was not imposing "0 >= x => 255" bound on the byte sequence if its size was 1. This was causing problems with `bsst-assume` tests, but likely that this could have caused problems elsewhere, too
+
+* To avoid confusion, data reference names cannot be "wit<N>" (where <N> is a number), because such names are reserved for witnesses
 
 * Fixes in parser: quotes within quotes were allowed, but should not; angle brackets were sometimes not ignored
 

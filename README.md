@@ -76,9 +76,13 @@ Syntax parser is rather basic:
 * ScriptNum values are represented with normal base10 integers.
 * Data (but not opcodes) can be enclosed in angle brackets (like this: `<0x1234>`), and these angle brackets will be ignored (for compatibilty with ScriptWiz IDE syntax)
 
+### Data placeholders
+
 Identifiers starting with `$` are recognized as data placeholders: `$some_var`
 
 `//` marks the start of the comment, that spans to end of line.
+
+### Data references
 
 A special format of comment is recoginzed:
 
@@ -90,6 +94,114 @@ different code paths result in different values assigned to the same reference i
 an apostrophe <<'>> will be appended to the identifier with different value.
 
 The data reference identifiers will be prepended with `&` in the report
+
+### Assertions
+
+Specially-formatted comments can be used to put constraints on value on top of the stack: `// bsst-assert:` and `// bsst-assert-size:`. The difference is that the former puts constraints on the value itself, while the latter constraints the
+data size instead of value.
+
+The expressibility of these assertions are limited, as their primary purpose is to help the solver by reducing the range of values to be considered.
+
+For the value on top of the stack constrained via assertion, B'SST will check
+if the value can happen to be outside the range defined by the assertion
+expression. If it can, the currently analyzed execution path will be deemed
+as failed, and in the report the failure will be shown as
+`assertion failed at line <N>` or `check_assertion_at_line_<N>` where `<N>`
+would be the line at which the failing `// bsst-assert:` comment is at.
+
+After the assertion check is successfully passed, the value will be assumed to be
+constrained by the assertion expression.
+
+The difference between `assertion failed at line <N>` and `check_assertion_at_line_<N>` is that the former is detected at the time the assertion is applied at the
+position in the script it resides on, while the later is detected afterwards, when other constraints are imposed on values, and that may cause the assertion constraints to be violated.
+
+A data reference can be supplied as argument, like `// bsst-assert(&ref):` or `// bsst-assert-size(&ref):`, and then the target of the assertion will be this data reference instead of the top of the stack. The assertion will be checked at the place where the assetion itself is declared, not at the place where the data reference is declared.
+
+A witness name in the form of `wit<N>` where `<N>` is a number, is also accepted as assertion argument. The witness must be referenced by the script at the time when assertion is checked, otherwise the assertion will be ignored (with a warning)
+
+#### Assertion expression syntax
+
+After `:`, a whitespace-separated list of expressions is expected,
+finished at end of line. The following is recognized in expressions:
+
+- decimal number: scriptnum equal to the number, for example `1`, `-33`
+- le64(<number>): LE64 value equal to the number, for example `le64(0)`, `le64(125)`
+- bytes in hex (either as 0x1234 or x('1234'): bytes equal to the hex-encoded
+- string in single quotes: bytes equal to utf-8 encoding of the string
+
+Before these, `!=` can be placed to express non-equality. `=` can also be placed
+before these, for readability: `=42` is the same as `42`. `!=le64(0)` means
+"not equal to 64-byte zero", `!='abc'` means "not equal to the string 'abc'"
+
+Before decimal number or le64 number, `>`, `<`, `>=`, `<=` can be placed
+to express "greater than", "less than", "greater or equal", "less or equal",
+for example `>0`, `<=-44`, `>=le64(999)`
+
+For decimal or le64 numbers, a range expression is recognized: `1..456` means
+from 1 to 456. Likewise, `le64(1)..le64(456)`
+
+Within one `// bsst-assert:` or `// bsst-assert-size:`, space-separated
+expressions are combined with `OR` logic.
+For example, `OP_ADD // bsst-assert: >1 !=8 <=-3` would express
+that "result of `OP_ADD` must be above 1 or not equal to 8 or less than or equal
+to -3". Note that !=8 here is meaningless, because (`>1` OR `!=8`) is the same
+as `>1`. So this expression constraints the value to "any representable
+scriptnum, except -2, -1, 0, 1"
+
+If more than one `// bsst-assert:` or `bsst-assert-size:` is placed without any
+script opcode or data between them, the expressions of the asserts since
+last opcode or data will be combined with `AND` logic. For example,
+
+```
+OP_ADD // bsst-assert: >1 <=-3 -44..55
+       // bsst-assert: 'a'
+       // bsst-assert-size: 1
+```
+
+Will express
+
+```
+((value above 1) OR (value below -2) OR (value between -44 and 55 inclusive))
+AND (value equal to 'a')
+AND (data size equal 1)
+```
+
+Note that expressions other than "value equal to 'a'" here are meaningless, but included for illustration purposes.
+
+Integers in asserts also impose scriptnum-encoding constraints on their targets.
+That is, `// bsst-assert: 3 0x00` is the same as `// bsst-assert: 3`, unless
+`---minimaldata-flag=false`, because `0x00` is not a minimal-encoded scriptnum,
+and, given that values are combined with `OR` logic, it will just be ignored.
+
+Combining `3` and `0x00` with two separate asserts on the same target value with
+the same minimaldata flag setting will result in assertion to always be triggered,
+because then these two will be combined with `AND` logic, and the result will be
+an empty set
+
+Asserts with LE64 integers also impose a constraint of 'size is exactly 8 bytes'
+on their targets.
+
+Mixing scriptnum and LE64 values in assert on the same target value is not
+allowed, although mixing scriptnums with arbitrary byte expressions is allowed.
+
+### Assumptions
+
+Specially-formatted comments can be used to put unconditional constraints
+on data placeholders: `// bsst-assume($name):` and `// bsst-assume-size($name):`
+to apply assumption to the data  placeholder `$name`.
+
+Assumptions differ from assertions in the following:
+
+- Only work with data placeholders
+- Applied to corresponding data placeholder regardless of where the assumption or the data placeholder reside in the source file
+- No check is performed to determine if the value can be outside of the range defined by the expression. The constraints defined by the expression are simply assumed to apply to the corresponding data placeholder
+
+In other aspects, assumptions work similar to assertions. The syntax for expressions is the same, different assumptions with the same data placeholder are combined with `AND` logic, `// bsst-assume-size($name):` works with data size instead of value, etc.
+
+Note that if conflicting assumptions are placed on a data placeholder,
+or an assumed constraint on data placeholder might possibly relate to a script
+failure, you can still see error code `check_assumption_at_line_<N>` where `<N>`
+points to the line with an assumption
 
 ## Reports
 

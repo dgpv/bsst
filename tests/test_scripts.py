@@ -1,26 +1,17 @@
 #!/usr/bin/env python3
 
 import os
-import sys
 import struct
 from contextlib import contextmanager
 from typing import Generator, Iterable
-from io import StringIO
 
 from bitcointx.core.key import CKey, XOnlyPubKey
 
 import bsst
 
+from test_util import CaptureStdout
+
 # pylama:ignore=E501
-
-
-@contextmanager
-def CaptureStdout() -> Generator[StringIO, None, None]:
-    save_stdout = sys.stdout
-    out = StringIO()
-    sys.stdout = out
-    yield out
-    sys.stdout = save_stdout
 
 
 @contextmanager
@@ -91,13 +82,10 @@ def do_test_single(script: str, *,
                   assume_no_160bit_hash_collisions=assume_no_160bit_hash_collisions,
                   nullfail_flag=nullfail_flag
                   ) as env:
-        (bsst.g_script_body,
-         bsst.g_line_no_table,
-         bsst.g_var_save_positions) = bsst.get_opcodes(script.split('\n'))
 
-        bsst.g_is_in_processing = True
+        env.script_info = bsst.get_opcodes(script.split('\n'))
+
         bsst.symex_script()
-        bsst.g_is_in_processing = False
         bsst.report()
 
         process_contexts(env)
@@ -107,7 +95,7 @@ def do_test_single(script: str, *,
             assert len(invalid_contexts) == 0
         else:
             assert len(invalid_contexts) > 0
-            assert not (set(failures) - set(expect_failures))
+            assert not (set(failures) - set(expect_failures)), failures
 
         return failures
 

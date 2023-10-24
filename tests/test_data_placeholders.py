@@ -2,12 +2,12 @@
 
 import sys
 
-from io import StringIO
-
 from contextlib import contextmanager
 from typing import Generator
 
 import bsst
+
+from test_util import CaptureStdout
 
 testcase = """
 $a 1 add
@@ -42,16 +42,7 @@ Witnesses used: 0
 
 
 @contextmanager
-def CaptureStdout() -> Generator[StringIO, None, None]:
-    save_stdout = sys.stdout
-    out = StringIO()
-    sys.stdout = out
-    yield out
-    sys.stdout = save_stdout
-
-
-@contextmanager
-def FreshEnv() -> Generator[None, None, None]:
+def FreshEnv() -> Generator[bsst.SymEnvironment, None, None]:
     env = bsst.SymEnvironment()
     env.use_parallel_solving = False
     env.log_progress = False
@@ -63,20 +54,16 @@ def FreshEnv() -> Generator[None, None, None]:
         bsst.try_import_optional_modules()
         bp = bsst.Branchpoint(pc=0, branch_index=0)
         with bsst.CurrentExecContext(bp.context):
-            yield
+            yield env
 
 
 def test() -> None:
-    with FreshEnv():
-        (bsst.g_script_body,
-         bsst.g_line_no_table,
-         bsst.g_var_save_positions) = bsst.get_opcodes(testcase.split('\n'))
+    with FreshEnv() as env:
+        env.script_info = bsst.get_opcodes(testcase.split('\n'))
 
         out: str = ''
         with CaptureStdout() as output:
-            bsst.g_is_in_processing = True
             bsst.symex_script()
-            bsst.g_is_in_processing = False
             bsst.report()
             out = output.getvalue()
 
