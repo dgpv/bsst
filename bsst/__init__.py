@@ -6106,18 +6106,36 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
             r = symresult(op, *maybe_sort_args(vch1, vch2))
 
             # access as_ByteSeq before checking canonical repr,
-            # so that constrants on BytesSeq symbolic variables will be
+            # so that constraints on BytesSeq symbolic variables will be
             # always set
             bytes1 = vch1.use_as_ByteSeq()
             bytes2 = vch2.use_as_ByteSeq()
+
+            r.set_possible_values(0, 1)
 
             if vch1.canonical_repr() == vch2.canonical_repr():
                 if vch1.is_static and vch2.is_static:
                     assert vch1.as_bytes() == vch2.as_bytes()
 
+                # equal canonical repr means equal byte values
+                Check(bytes1 == bytes2)
+
                 r.set_as_Int(1)
+            elif (env.minimaldata_flag and
+                  vch1.was_used_as_Int and vch2.was_used_as_Int):
+                # equal(add($a, 1), sub(add($a ,2), 1) might not be
+                # detected as 'always true' and $a is not restricted in any way
+                # this seems to be limitation of the solver, where it cannot
+                # infer equality after some arithmetic operationn and then
+                # convertint the results to bytes via scriptnum_to_sym_integer
+                # therefore we check if data was used as integers before, and
+                # if so, we will compare data as integers, but only if
+                # minimaldata flag is set.
+                r.set_as_Int(If(vch1.as_Int() == vch2.as_Int(), 1, 0))
+                # bytes equality must match integer equality, but do this check
+                # just in case
+                Check(If(r.as_Int() == 1, bytes1 == bytes2, bytes1 != bytes2))
             else:
-                r.set_possible_values(0, 1)
                 r.set_as_Int(If(bytes1 == bytes2, 1, 0))
 
             if op == OP_EQUALVERIFY:
@@ -6223,12 +6241,17 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                 cr1 = bn1.canonical_repr()
                 cr2 = bn2.canonical_repr()
 
-                if op == OP_SUB and cr1 == cr2:
-                    r.set_static(0)
-                elif op in (OP_NUMEQUAL, OP_NUMEQUALVERIFY) and cr1 == cr2:
-                    r.set_static(1)
-                elif op == OP_NUMNOTEQUAL and cr1 == cr2:
-                    r.set_static(0)
+                if cr1 == cr2:
+                    # if canonical representations match,
+                    # values must also match
+                    Check(arg1 == arg2)
+
+                    if op == OP_SUB:
+                        r.set_static(0)
+                    elif op in (OP_NUMEQUAL, OP_NUMEQUALVERIFY):
+                        r.set_static(1)
+                    elif op == OP_NUMNOTEQUAL:
+                        r.set_static(0)
 
             max_size = 4
             if op in (OP_ADD, OP_SUB):
