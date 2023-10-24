@@ -182,7 +182,7 @@ of the script: `SCRIPT_VERIFY_SIGPUSHONLY`, `SCRIPT_VERIFY_CONST_SCRIPTCODE`,
 `SCRIPT_VERIFY_P2SH`, `SCRIPT_VERIFY_WITNESS`, `SCRIPT_VERIFY_TAPROOT` for all modes,
 and `SCRIPT_NO_SIGHASH_BYTE` for Elements mode.
 
-For `SCRIPT_VERIFY_LOW_S`, signatures are only checked if their data is known statically
+For `SCRIPT_VERIFY_LOW_S`, signatures are checked for "Low S" condition only if their data is known statically
 
 Script size limit is not modelled (the limit of 10000 bytes that exists for segwit and pre-segwit)
 
