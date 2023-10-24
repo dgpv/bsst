@@ -1361,7 +1361,7 @@ g_stack_symdata_index: int | None = None
 g_current_exec_context: Optional['ExecContext'] = None
 g_current_op: Optional['OpCode'] = None
 g_skip_assertion_for_enforcement_condition: Optional[tuple['SymData', int]] = None
-g_data_references: dict[str, 'SymData'] = {}
+g_data_placeholders: dict[str, 'SymData'] = {}
 
 g_check_op_start_time = 0.0
 
@@ -5372,10 +5372,14 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
                     'non-minimal immediate data encountered when '
                     'minimaldata flag handling is strict')
 
-            data = SymData(name=sd.name, static_value=sd.value)
             if sd.name and sd.name.startswith('$'):
-                if sd.name not in g_data_references:
-                    g_data_references[sd.name] = data
+                if sd.name not in g_data_placeholders:
+                    g_data_placeholders[sd.name] = SymData(
+                        name=sd.name, unique_name=f'_dph_{sd.name}')
+
+                data = g_data_placeholders[sd.name]
+            else:
+                data = SymData(name=sd.name, static_value=sd.value)
 
             push(data)
 
@@ -7884,7 +7888,7 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
             txval.update_model_values_request_dict(mvdict_req, mvnamemap)
             processed.append(txval)
 
-        for val in g_data_references.values():
+        for val in g_data_placeholders.values():
             if val not in processed:
                 val.update_model_values_request_dict(mvdict_req, mvnamemap)
                 processed.append(val)
@@ -7963,7 +7967,7 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
     txvalues = ctx.tx.values()
     got_model_values = (env.produce_model_values and
                         (ctx.used_witnesses or txvalues or ctx.stack
-                         or g_data_references))
+                         or g_data_placeholders))
 
     if env.produce_model_values:
 
@@ -7985,7 +7989,7 @@ def _finalize(ctx: ExecContext) -> None:  # noqa
             txval.check_only_one_value_possible()
             processed.append(txval)
 
-        for val in g_data_references.values():
+        for val in g_data_placeholders.values():
             if val in processed:
                 env.write_line(f'skip checking {val}: already checked')
             else:
@@ -8163,7 +8167,7 @@ def report() -> None:  # noqa
                 for txval in txvalues:
                     mvals_list.append(f'{txval} {get_val_str(txval)}')
 
-                for vname, val in g_data_references.items():
+                for vname, val in g_data_placeholders.items():
                     mvals_list.append(f'{vname} {get_val_str(val)}')
 
                 for w in bp.context.used_witnesses:
