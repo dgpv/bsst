@@ -4675,11 +4675,11 @@ class SymData:
             while True:
                 for other_cr, other_entry in g_data_reference_names_table.items():
                     if other_cr != cr and dr in other_entry:
-                        did_altname = f"{dr}'"
+                        dr_altname = f"{dr}'"
                         if dr == data_reference:
-                            data_reference = did_altname
+                            data_reference = dr_altname
 
-                        dr = did_altname
+                        dr = dr_altname
                         break
                 else:
                     break
@@ -8041,9 +8041,9 @@ def data_reference_names_show() -> None:
 
     def get_data_reference_names_rec() -> list[tuple[list[str], str]]:
         result: list[tuple[list[str], str]] = []
-        did_copy = g_data_reference_names_table.copy()
+        drn_copy = g_data_reference_names_table.copy()
 
-        for _, vndict in did_copy.items():
+        for _, vndict in drn_copy.items():
             data_reference_names: list[str] = []
             for dr, (value, ctx) in vndict.items():
                 if dr not in seen_data_reference_names:
