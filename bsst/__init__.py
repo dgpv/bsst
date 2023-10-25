@@ -6124,10 +6124,10 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
             elif (env.minimaldata_flag and
                   vch1.was_used_as_Int and vch2.was_used_as_Int):
                 # equal(add($a, 1), sub(add($a ,2), 1) might not be
-                # detected as 'always true' and $a is not restricted in any way
+                # detected as 'always true' if $a is not restricted in any way
                 # this seems to be limitation of the solver, where it cannot
                 # infer equality after some arithmetic operationn and then
-                # convertint the results to bytes via scriptnum_to_sym_integer
+                # converting the results to bytes via scriptnum_to_sym_integer
                 # therefore we check if data was used as integers before, and
                 # if so, we will compare data as integers, but only if
                 # minimaldata flag is set.
