@@ -3,6 +3,7 @@
 set -ex
 
 ./test_integer_conversion.py
+./test_data_placeholders.py
 ./test_varnames.py
 ./test_elements_script_tests.py ./script_tests_tapscript_opcodes.json tapscript
 if [ ! -e script_tests.json ]; then
