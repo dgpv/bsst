@@ -7714,6 +7714,10 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
             if op_str.startswith('$') and op_str[1:].isidentifier():
                 op = ScriptData(name=op_str, value=None)
             elif len(op_str) >= 2 and op_str[0] == "'" and op_str[-1] == "'":
+                if "'" in op_str[1:-1]:
+                    die('ambiguous quotes. you have to use hex encoding '
+                        'if you want to include single quote (0x27) in data')
+
                 op = ScriptData(name=None, value=op_str[1:-1],
                                 do_check_non_minimal=env.minimaldata_flag_strict)
             elif (env.is_elements and
@@ -7756,8 +7760,7 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
 
                 op = ScriptData(name=None, value=v)
 
-            elif not got_angle_brackets and (op_str.lower().startswith("x('")
-                                             and op_str.endswith("')")):
+            elif op_str.lower().startswith("x('") and op_str.endswith("')"):
                 data_str = op_str[3:-2]
                 try:
                     op = ScriptData(

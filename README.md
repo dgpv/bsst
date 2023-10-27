@@ -66,14 +66,15 @@ using `ctypes.cdll.LoadLibrary`.
 
 ## Syntax
 
-Syntax parser is non-strict:
+Syntax parser is rather basic:
 
 * Case-insensitive
 * `OP_ADD` is the same as `ADD`,
-* The string `'data'` can be represented as: `'data'`, `x('64617461')`, or `0x64617461`.
-* Strings in quotes cannot contain whitespace, and can use only single quotes (`'`)
+* The string `'data'` can be represented as: `'data'`, `x('64617461')`, or `0x64617461`. Only single quotes are recognized for strings.
+* Strings in quotes cannot contain whitespace or single quotes. If you need whitespace or single quote in the string, use hex encoding.
 * LE64 value 555 can be represented as `x('2b02000000000000')`, `0x2b02000000000000`, or `le64(555)`.
 * ScriptNum values are represented with normal base10 integers.
+* Data (but not opcodes) can be enclosed in angle brackets (like this: `<0x1234>`), and these angle brackets will be ignored (for compatibilty with ScriptWiz IDE syntax)
 
 Identifiers starting with `$` are recognized as data placeholders: `$some_var`
 
