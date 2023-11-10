@@ -1748,7 +1748,8 @@ def _decode_scriptnum(src: 'z3.SeqSortRef', dst: 'z3.ArithRef', size: int,
         v += src[idx+1] * 2**(8*(idx+1))
 
     if size == 1:
-        return If(v < 0x80, dst == v, dst == -(v-0x80))
+        return And(_get_byte_bounding_exp(src, size),
+                   If(v < 0x80, dst == v, dst == -(v-0x80)))
 
     return If(src_len == size,
               And(_get_byte_bounding_exp(src, size),
