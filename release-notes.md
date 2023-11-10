@@ -1,5 +1,16 @@
 # B'SST release notes
 
+Version 0.1.2.dev0:
+
+* Fix: scriptnum decoding was not imposing "0 >= x => 255" bound on the byte sequence if its size was 1.
+  This was causing problems with `bsst-assume` tests, but likely that this could have caused problems elsewhere, too
+
+* Fixes in parser: quotes within quotes were allowed, but should not; angle brackets were sometimes not ignored
+
+* Fix: data placholders with same names should be assumed equal, but were not
+
+* Other minor improvements and fixes
+
 Version 0.1.1:
 
 * Fixed a bug with number of used witnesses shown incorrectly in the report when Z3 is disabled
