@@ -71,16 +71,16 @@ Syntax parser is rather basic:
 * Case-insensitive
 * `OP_ADD` is the same as `ADD`,
 * The string `'data'` can be represented as: `'data'`, `x('64617461')`, or `0x64617461`. Only single quotes are recognized for strings.
-* Strings in quotes cannot contain whitespace or single quotes. If you need whitespace or single quote in the string, use hex encoding.
+* Strings in quotes cannot contain whitespace, single quotes, or comment markers. If you need whitespace, single quote, or comment marker in the string, use hex encoding.
 * LE64 value 555 can be represented as `x('2b02000000000000')`, `0x2b02000000000000`, or `le64(555)`.
 * ScriptNum values are represented with normal base10 integers.
 * Data (but not opcodes) can be enclosed in angle brackets (like this: `<0x1234>`), and these angle brackets will be ignored (for compatibilty with ScriptWiz IDE syntax)
 
+`//` marks the start of the comment, that spans to end of line. Note that comments are removed before parsing the rest of the line, and because of this, comment markers cannot appear within quoted strings
+
 ### Data placeholders
 
 Identifiers starting with `$` are recognized as data placeholders: `$some_var`
-
-`//` marks the start of the comment, that spans to end of line.
 
 ### Data references
 
