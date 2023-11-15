@@ -174,7 +174,7 @@ That is, `// bsst-assert: 3 0x00` is the same as `// bsst-assert: 3`, unless
 and, given that values are combined with `OR` logic, it will just be ignored.
 
 Combining `3` and `0x00` with two separate asserts on the same target value with
-the same minimaldata flag setting will result in assertion to always be triggered,
+the minimaldata flag set to true will result in assertion to always be triggered,
 because then these two will be combined with `AND` logic, and the result will be
 an empty set
 
