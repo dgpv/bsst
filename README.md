@@ -76,7 +76,7 @@ Syntax parser is rather basic:
 * ScriptNum values are represented with normal base10 integers.
 * Data (but not opcodes) can be enclosed in angle brackets (like this: `<0x1234>`), and these angle brackets will be ignored (for compatibilty with ScriptWiz IDE syntax)
 
-`//` marks the start of the comment, that spans to end of line. Note that comments are removed before parsing the rest of the line, and because of this, comment markers cannot appear within quoted strings
+`//` marks the start of the comment, that spans to end of line. This character sequence can be changed with `--comment-marker` setting. Note that comments are removed before parsing the rest of the line, and because of this, comment markers cannot appear within quoted strings
 
 ### Data placeholders
 
@@ -367,6 +367,14 @@ without installing `bsst` python module.
         Enabling this will set `--all-z3-assertions-are-tracked-assertions`
         to true, and also shows all triggered tracked assertions as possible
         script failures
+
+  --comment-marker='//'
+
+        A marker that designates the start of the comment. The comment
+        spans to the end of line. Comments are removed before any parsing is
+        done on the source, and therefore the comment marker cannot appear
+        within quoted strings. Any non-whitespace sequence of characters is
+        allowed as a comment marker.
 
   --points-of-interest=''
 

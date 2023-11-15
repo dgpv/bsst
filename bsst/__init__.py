@@ -204,6 +204,26 @@ class SymEnvironment:
         self._z3_debug = value
 
     @property
+    def comment_marker(self) -> str:
+        """A marker that designates the start of the comment. The comment
+        spans to the end of line. Comments are removed before any parsing is
+        done on the source, and therefore the comment marker cannot appear
+        within quoted strings. Any non-whitespace sequence of characters is
+        allowed as a comment marker.
+        """
+        return self._comment_marker
+
+    @comment_marker.setter
+    def comment_marker(self, value: str) -> None:
+        if not value:
+            raise ValueError('comment marker must not be empty')
+
+        if re.search('\\s', value):
+            raise ValueError('no whitespace is allowed in comment marker')
+
+        self._comment_marker = value
+
+    @property
     def points_of_interest(self) -> set[int | str]:
         """A set of "points" in the script to report the execution state at,
         in addition to the usual information in the report.
@@ -961,6 +981,7 @@ class SymEnvironment:
         self._input_file = '-'
         self._z3_enabled = False
         self._z3_debug = False
+        self._comment_marker = '//'
         self._points_of_interest = set()
         self._use_z3_incremental_mode = False
         self._use_parallel_solving = True
@@ -8192,10 +8213,11 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
         assn_dph_name = ''
         assn_dref_name = ''
         data_reference = ''
-        # remove '//' comments
-        if m := re.search('//', line):
-            comment = line[m.end():]
-            line = line[:m.start()]
+        # remove comments
+        comment_pos = line.find(env.comment_marker)
+        if comment_pos >= 0:
+            comment = line[comment_pos+len(env.comment_marker):]
+            line = line[:comment_pos]
             if m := re.match('\\s*=>(\\S+)', comment):
                 data_reference = m.group(1)
 
