@@ -386,6 +386,10 @@ without installing `bsst` python module.
         in the script, or the string "L<num>" where "<num>" is the line number
         in the text of the script
 
+  --explicitly-enabled-opcodes=''
+
+        A set of opcodes to explicitly enable
+
   --produce-model-values=true
 
         Produce 'model values' for fields of transaction, witnesses, and

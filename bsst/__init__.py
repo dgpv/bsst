@@ -107,6 +107,7 @@ import signal
 import random
 import hashlib
 import inspect
+import itertools
 import importlib
 import importlib.util
 import multiprocessing
@@ -242,8 +243,7 @@ class SymEnvironment:
     @points_of_interest.setter
     def points_of_interest(self, values: Iterable[str]) -> None:
         result_set: set[int | str] = set()
-        for v in values:
-            poi_str = v.strip()
+        for poi_str in values:
             poi: int | str
             if poi_str.isdigit():
                 poi = int(poi_str)
@@ -268,6 +268,28 @@ class SymEnvironment:
             result_set.add(poi)
 
         self._points_of_interest = result_set
+
+    @property
+    def explicitly_enabled_opcodes(self) -> set[str]:
+        """A set of opcodes to explicitly enable
+        """
+        return set(op.name for op in self._explicitly_enablded_opcodes)
+
+    @explicitly_enabled_opcodes.setter
+    def explicitly_enabled_opcodes(self, values: Iterable[str]) -> None:
+        result_set: set[OpCode] = set()
+        for v in values:
+            if v.startswith('OP_'):
+                v = v[3:]
+
+            for op in itertools.chain.from_iterable(g_opcodes_for_mode.values()):
+                if op.name == v:
+                    result_set.add(op)
+                    break
+            else:
+                raise ValueError('cannot enable opcode that is not recognized')
+
+        self._explicitly_enablded_opcodes = result_set
 
     @property
     def produce_model_values(self) -> bool:
@@ -989,6 +1011,7 @@ class SymEnvironment:
         self._z3_debug = False
         self._comment_marker = '//'
         self._points_of_interest = set()
+        self._explicitly_enablded_opcodes = set()
         self._use_z3_incremental_mode = False
         self._use_parallel_solving = True
         self._parallel_solving_num_processes = 0
@@ -1056,7 +1079,6 @@ class SymEnvironment:
         self.data_placeholders: dict[str, 'SymData'] = {}
 
         self._root_branch: Optional['Branchpoint'] = None
-        self._enabled_opcodes: list['OpCode'] = []
         self._solver: Optional['z3.Solver'] = None
         self._failure_code: Optional['z3.ArithRef'] = None
         self._last_output_chars: dict[TextIO, str] = {}
@@ -1185,6 +1207,8 @@ class SymEnvironment:
         for pname in self.op_plugins:
             name = op_plugin_name(os.path.basename(pname))
             mode_ops |= set(g_opcodes_for_mode.get(name, []))
+
+        mode_ops |= self._explicitly_enablded_opcodes
 
         return tuple(mode_ops)
 
@@ -9675,16 +9699,25 @@ def parse_cmdline_args() -> None:  # noqa
                     f"Setting \"--{argname}\" can be only 'true' or 'false'\n")
                 sys.exit(-1)
         elif isinstance(cur_v, set):
+            member_values: list[str] = []
+            for mstr in value_str.split(','):
+                mstr = mstr.strip()
+                if re.search('\\s', mstr):
+                    sys.stderr.write(f"Values for --{argname} must be comma-separated\n")
+                    sys.exit(-1)
+
+                member_values.append(mstr)
+
             try:
-                setattr(env, name, value_str.split(','))
+                setattr(env, name, member_values)
             except ValueError as e:
-                sys.stderr.write(f"Incorrect value for --{argname}: {e}'\n")
+                sys.stderr.write(f"Incorrect value for --{argname}: {e}\n")
                 sys.exit(-1)
         elif isinstance(cur_v, tuple):
             try:
                 setattr(env, name, value_str.split())
             except ValueError as e:
-                sys.stderr.write(f"Incorrect value for --{argname}: {e}'\n")
+                sys.stderr.write(f"Incorrect value for --{argname}: {e}\n")
                 sys.exit(-1)
         elif isinstance(cur_v, int):
             if not value_str.isdigit():
