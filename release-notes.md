@@ -4,6 +4,8 @@ Version 0.1.2.dev0:
 
 * Add ability to set assertions on stack values and witnesses, and assumptions for data placeholders. Please see newly added "Assertions" and "Assumptions" sections in README. You might also look at `tests/test_assertions_and_assumptions.py` for examples of usage
 
+* Add settings to set comment marker. Note that comments are removed before parsing the rest of the line, and because of this, comment markers cannot appear within quoted strings
+
 * Fix: scriptnum decoding was not imposing "0 >= x => 255" bound on the byte sequence if its size was 1. This was causing problems with `bsst-assume` tests, but likely that this could have caused problems elsewhere, too
 
 * To avoid confusion, data reference names cannot be "wit<N>" (where <N> is a number), because such names are reserved for witnesses
