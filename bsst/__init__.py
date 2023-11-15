@@ -208,8 +208,10 @@ class SymEnvironment:
         """A marker that designates the start of the comment. The comment
         spans to the end of line. Comments are removed before any parsing is
         done on the source, and therefore the comment marker cannot appear
-        within quoted strings. Any non-whitespace sequence of characters is
-        allowed as a comment marker.
+        within quoted strings. Any non-whitespace sequence of non-alphanumeric
+        characters is allowed as a comment marker. Using characters that appear
+        in your source in non-comment sections might lead to confusion, so
+        please use this setting with caution
         """
         return self._comment_marker
 
@@ -220,6 +222,10 @@ class SymEnvironment:
 
         if re.search('\\s', value):
             raise ValueError('no whitespace is allowed in comment marker')
+
+        if any(c.isalnum() for c in value):
+            raise ValueError(
+                'alphanumeric characters are not allowed in comment marker')
 
         self._comment_marker = value
 
