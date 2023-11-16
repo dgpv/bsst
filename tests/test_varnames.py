@@ -142,7 +142,6 @@ def FreshEnv() -> Generator[bsst.SymEnvironment, None, None]:
     env.solver_timeout_seconds = 0
 
     with bsst.CurrentEnvironment(env):
-        bsst.try_import_optional_modules()
         bp = bsst.Branchpoint(pc=0, branch_index=0)
         with bsst.CurrentExecContext(bp.context):
             yield env
@@ -150,7 +149,7 @@ def FreshEnv() -> Generator[bsst.SymEnvironment, None, None]:
 
 def test(testno: int, expres: list[str]) -> None:
     with FreshEnv() as env:
-        env.script_info = bsst.get_opcodes(testcase[testno].split('\n'))
+        env.script_info = bsst.parse_script_lines(testcase[testno].split('\n'))
 
         out: str = ''
         with CaptureStdout() as output:

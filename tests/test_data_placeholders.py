@@ -51,7 +51,6 @@ def FreshEnv() -> Generator[bsst.SymEnvironment, None, None]:
     env.produce_model_values = False
 
     with bsst.CurrentEnvironment(env):
-        bsst.try_import_optional_modules()
         bp = bsst.Branchpoint(pc=0, branch_index=0)
         with bsst.CurrentExecContext(bp.context):
             yield env
@@ -59,7 +58,7 @@ def FreshEnv() -> Generator[bsst.SymEnvironment, None, None]:
 
 def test() -> None:
     with FreshEnv() as env:
-        env.script_info = bsst.get_opcodes(testcase.split('\n'))
+        env.script_info = bsst.parse_script_lines(testcase.split('\n'))
 
         out: str = ''
         with CaptureStdout() as output:

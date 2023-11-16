@@ -18,7 +18,6 @@ def FreshEnv() -> Generator[None, None, None]:
     env.solver_timeout_seconds = 0
 
     with bsst.CurrentEnvironment(env):
-        bsst.try_import_optional_modules()
         bp = bsst.Branchpoint(pc=0, branch_index=0)
         with bsst.CurrentExecContext(bp.context):
             yield

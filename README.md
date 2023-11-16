@@ -265,10 +265,11 @@ B'SST gives this report:
 
 https://gist.github.com/dgpv/b57ecf4d9e3d0bfdcc2eb9147c9b9abf
 
-## Custom opcodes
+## Plugins
 
-Please look at `examples/example_op_plugin.py`. With `--op-plugins=examples/example_op_plugin.py`,
-B'SST will recognize `EXAMPLE` custom opcode.
+It is possible to instrument the analysis and add new features with plugins.
+
+Please look at `plugins/README.md` for details.
 
 ## Assumptions and omissions
 
@@ -327,11 +328,11 @@ The file `bsst/__init__.py` is itself a runnable script without any mandatory de
 It is possible to just copy `bsst/__init__.py` into a convenient location under convenient name, and run it directly,
 without installing `bsst` python module.
 
-## Usage:
+## Usage
 
         bsst-cli [options] [settings]
 
-## Available options:
+## Available options
 
   --help
 
@@ -345,9 +346,14 @@ without installing `bsst` python module.
 
         Show version
 
-## Available settings:
+## Available settings
 
   Default value for each setting is shown after the '=' sign
+
+  Giving value for the same setting twice replaces the value,
+  except the case where setting is a "set", in which case the
+  set of values assigned to the setting gets updated
+
 
   --input-file='-'
 
@@ -684,7 +690,7 @@ without installing `bsst` python module.
         non-seqwit size for transaction and min size of output.
         Might adjust default value later.
 
-  --op-plugins=''
+  --plugins=''
 
-        Set of opcode handling plugins to load (paths to python files
-        with names ending in '_op_plugin.py')
+        Set of plugins to load (paths to python files with names
+        ending in '_bsst_plugin.py')

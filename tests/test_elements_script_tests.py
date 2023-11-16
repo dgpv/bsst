@@ -36,7 +36,6 @@ def FreshEnv(*, z3_enabled: bool = False
     env.solver_timeout_seconds = 0
 
     with bsst.CurrentEnvironment(env):
-        bsst.try_import_optional_modules()
         with bsst.CurrentExecContext(env.get_root_branch().context):
             yield env
 
@@ -97,7 +96,7 @@ def convert_script(line: str, flags: list[str],
         elif len(op_str) >= 2 and op_str[0] == "'" and op_str[-1] == "'":
             script_bytes.append(CScript([op_str[1:-1].encode('utf-8')]))
         else:
-            ops = bsst.get_opcodes([maybe_subst_with_nop(op_str, flags)]).body
+            ops = bsst.parse_script_lines([maybe_subst_with_nop(op_str, flags)]).body
             assert len(ops) == 1
             assert isinstance(ops[0], bsst.OpCode)
             script_bytes.append(CScript(bytes([ops[0].code])))
@@ -128,7 +127,7 @@ def convert_script(line: str, flags: list[str],
 
             script_lines.append(maybe_subst_with_nop(op_str, flags))
 
-    return bsst.get_opcodes(script_lines).body
+    return bsst.parse_script_lines(script_lines).body
 
 
 supported_flags = {'DISCOURAGE_UPGRADEABLE_PUBKEY_TYPE', 'STRICTENC',

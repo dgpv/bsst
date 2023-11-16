@@ -6,6 +6,7 @@ set -ex
 ./test_data_placeholders.py
 ./test_varnames.py
 ./test_assertions_and_assumptions.py
+./test_hooks.py
 ./test_elements_script_tests.py ./script_tests_tapscript_opcodes.json tapscript
 if [ ! -e script_tests.json ]; then
     wget https://raw.githubusercontent.com/ElementsProject/elements/master/src/test/data/script_tests.json

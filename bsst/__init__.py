@@ -107,7 +107,6 @@ import signal
 import random
 import hashlib
 import inspect
-import itertools
 import importlib
 import importlib.util
 import multiprocessing
@@ -135,8 +134,8 @@ if not Union:  # always false
 ALWAYS_TRUE_WARN_SIGN = '<*>'
 LOCAL_ALWAYS_TRUE_SIGN = '{*}'
 
-PLUGIN_FILE_SUFFIX = '_op_plugin.py'
-PLUGIN_NAME_PREFIX = 'op_plugin'
+PLUGIN_FILE_SUFFIX = '_bsst_plugin.py'
+PLUGIN_NAME_PREFIX = 'plugin_'
 
 
 class BSSTError(Exception):
@@ -155,17 +154,17 @@ class BSSTSolvingError(BSSTError):
     ...
 
 
-class BSSTInitializationError(BSSTError):
+class ScriptFailure(Exception):
+    ...
+
+
+class ScriptFailureSolver(ScriptFailure):
     ...
 
 
 class SymEnvironment:
 
     _nulldummy_flag: Optional[bool]
-
-    post_finalize_hook: Optional[
-        Callable[['ExecContext', 'SymEnvironment'], None]
-    ] = None
 
     @property
     def input_file(self) -> str:
@@ -190,6 +189,13 @@ class SymEnvironment:
 
     @z3_enabled.setter
     def z3_enabled(self, value: bool) -> None:
+        global z3
+        if value:
+            if 'z3' not in sys.modules:
+                import z3
+
+            z3 = sys.modules['z3']
+
         self._z3_enabled = value
 
     @property
@@ -267,29 +273,28 @@ class SymEnvironment:
 
             result_set.add(poi)
 
-        self._points_of_interest = result_set
+        self._points_of_interest.update(result_set)
 
     @property
     def explicitly_enabled_opcodes(self) -> set[str]:
         """A set of opcodes to explicitly enable
         """
-        return set(op.name for op in self._explicitly_enablded_opcodes)
+        return self._explicitly_enabled_opcodes
 
     @explicitly_enabled_opcodes.setter
     def explicitly_enabled_opcodes(self, values: Iterable[str]) -> None:
-        result_set: set[OpCode] = set()
+        result_set: set[str] = set()
         for v in values:
+            v = v.upper()
             if v.startswith('OP_'):
                 v = v[3:]
 
-            for op in itertools.chain.from_iterable(g_opcodes_for_mode.values()):
-                if op.name == v:
-                    result_set.add(op)
-                    break
+            if v in self.opcode_table:
+                result_set.add(v)
             else:
                 raise ValueError('cannot enable opcode that is not recognized')
 
-        self._explicitly_enablded_opcodes = result_set
+        self._explicitly_enabled_opcodes.update(result_set)
 
     @property
     def produce_model_values(self) -> bool:
@@ -634,7 +639,7 @@ class SymEnvironment:
         assert isinstance(value, str)
 
         with CurrentEnvironment(self.__class__()):
-            si = get_opcodes([value])
+            si = parse_script_lines([value])
             self._skip_immediately_failed_branches_on = si.body
 
     @property
@@ -987,22 +992,25 @@ class SymEnvironment:
         self._max_num_outputs = value
 
     @property
-    def op_plugins(self) -> set[str]:
-        """Set of opcode handling plugins to load (paths to python files
-        with names ending in '_op_plugin.py')
+    def plugins(self) -> set[str]:
+        """Set of plugins to load (paths to python files with names
+        ending in '_bsst_plugin.py')
         """
-        return self._op_plugins
+        return self._plugins
 
-    @op_plugins.setter
-    def op_plugins(self, value: Iterable[str]) -> None:
-        for name in value:
+    @plugins.setter
+    def plugins(self, value: Iterable[str]) -> None:
+        plugins_set = set(value)
+        for name in plugins_set:
             if not name.endswith(PLUGIN_FILE_SUFFIX):
                 raise ValueError(
                     f'plugin file names must end with \'{PLUGIN_FILE_SUFFIX}\'')
             if not os.path.exists(name):
                 raise ValueError('plugin file does not exist')
 
-        self._op_plugins = set(value)
+        self._plugins.update(plugins_set)
+
+        self.load_plugin_modules()
 
     def __init__(self, *, is_for_usage_message: bool = False) -> None:
         self._is_for_usage_message = is_for_usage_message
@@ -1010,8 +1018,8 @@ class SymEnvironment:
         self._z3_enabled = False
         self._z3_debug = False
         self._comment_marker = '//'
-        self._points_of_interest = set()
-        self._explicitly_enablded_opcodes = set()
+        self._points_of_interest: set[int | str] = set()
+        self._explicitly_enabled_opcodes: set[str] = set()
         self._use_z3_incremental_mode = False
         self._use_parallel_solving = True
         self._parallel_solving_num_processes = 0
@@ -1054,7 +1062,7 @@ class SymEnvironment:
         self._max_tx_size = 1000000
         self._max_num_inputs = 24386
         self._max_num_outputs = self._max_tx_size // (9+1+33+33)
-        self._op_plugins = set()
+        self._plugins: set[str] = set()
 
         self._sym_ec_mul_scalar_fun: Optional['z3.Function'] = None
         self._sym_ec_tweak_add_fun: Optional['z3.Function'] = None
@@ -1063,7 +1071,8 @@ class SymEnvironment:
         self._sym_hashfun: dict[str, 'z3.FuncDeclRef'] = {}
         self._sym_bitfun8: dict[str, 'z3.FuncDeclRef'] = {}
         self._z3_tracked_assertion_lines: dict[str, int] = {}
-        self._op_plugin_modules: set[types.ModuleType] = set()
+        self._plugin_modules: set[types.ModuleType] = set()
+        self._plugin_module_state: dict[str, dict[str, Any]] = {}
 
         self.tracked_failure_codes: dict[str, int] = {}
         self.z3_constraints_stack: list[
@@ -1077,11 +1086,71 @@ class SymEnvironment:
         self.dummyexpr_counter = 0
         self.stack_symdata_index: int | None = None
         self.data_placeholders: dict[str, 'SymData'] = {}
+        self.check_op_start_time = 0.0
 
         self._root_branch: Optional['Branchpoint'] = None
         self._solver: Optional['z3.Solver'] = None
         self._failure_code: Optional['z3.ArithRef'] = None
         self._last_output_chars: dict[TextIO, str] = {}
+
+        self.secp256k1_handle: ctypes.CDLL | None = None
+        self.secp256k1_context: Any = None
+        self.secp256k1_has_xonly_pubkeys = False
+
+        try_import_secp256k1(self)
+
+        self.opcode_table: dict[str, OpCode] = g_default_opcode_table.copy()
+
+        self._parse_input_file_hook_plugin_name = ''
+        self._parse_input_file_hook: Optional[
+            Callable[['SymEnvironment', dict[str, Any]], 'ScriptInfo']
+        ] = None
+
+        self._plugin_settings_hooks: dict[
+            str, Callable[['SymEnvironment', str, dict[str, Any]], None]
+        ] = {}
+
+        self._plugin_comment_hooks: dict[
+            str, Callable[['SymEnvironment', str, int, int, dict[str, Any]], None]
+        ] = {}
+
+        self._report_start_hooks: dict[
+            str, Callable[['SymEnvironment', dict[str, Any]], None]
+        ] = {}
+
+        self._report_end_hooks: dict[
+            str, Callable[['SymEnvironment', dict[str, Any]], None]
+        ] = {}
+
+        self._script_failure_hooks: dict[
+            str, Callable[['SymEnvironment', 'ExecContext', dict[str, Any]], None]
+        ] = {}
+
+        self._pushdata_hooks: dict[
+            str, Callable[['SymEnvironment', 'ExecContext', 'ScriptData',
+                           'PluginStackHelperFunctions', dict[str, Any]],
+                          None]
+        ] = {}
+
+        self._pre_opcode_hooks: dict[
+            str, Callable[['SymEnvironment', 'ExecContext', 'OpCode',
+                           'PluginStackHelperFunctions', dict[str, Any]],
+                          bool]
+        ] = {}
+
+        self._post_opcode_hooks: dict[
+            str, Callable[['SymEnvironment', 'ExecContext', 'OpCode',
+                           'PluginStackHelperFunctions', dict[str, Any]],
+                          None]
+        ] = {}
+
+        self._pre_finalize_hooks: dict[
+            str, Callable[['SymEnvironment', 'ExecContext', dict[str, Any]], None]
+        ] = {}
+
+        self._post_finalize_hooks: dict[
+            str, Callable[['SymEnvironment', 'ExecContext', dict[str, Any]], None]
+        ] = {}
 
     def get_solver(self) -> 'z3.Solver':
         if not self.z3_enabled:
@@ -1186,60 +1255,231 @@ class SymEnvironment:
 
         return self._root_branch
 
-    def get_loaded_op_plugins(self) -> set[types.ModuleType]:
-        return self._op_plugin_modules
+    def get_enabled_opcodes(self) -> list['OpCode']:
+        return [op for op in self.opcode_table.values() if op.is_enabled(self)]
 
-    def get_enabled_opcodes(self) -> tuple['OpCode', ...]:
-        mode_ops: set['OpCode']
-        if self.is_elements:
-            tapscript_ops = set(g_opcodes_for_mode['elements_tapscript']
-                                + g_opcodes_for_mode['bitcoin_tapscript'])
-            mode_ops = set(g_opcodes_for_mode['elements']
-                           + g_opcodes_for_mode['bitcoin'])
-        else:
-            tapscript_ops = set(g_opcodes_for_mode['bitcoin_tapscript'])
-            mode_ops = set(g_opcodes_for_mode['bitcoin'])
+    def set_hooks(  # noqa
+        self, *,
+        parse_input_file: Optional[
+            Callable[['SymEnvironment', dict[str, Any]], 'ScriptInfo']] = None,
+        plugin_settings: Optional[
+            Callable[['SymEnvironment', str, dict[str, Any]], None]] = None,
+        plugin_comment: Optional[
+            Callable[['SymEnvironment', str, int, int, dict[str, Any]],
+                     None]] = None,
+        script_failure: Optional[
+            Callable[['SymEnvironment', 'ExecContext', dict[str, Any]],
+                     None]] = None,
+        report_start: Optional[
+            Callable[['SymEnvironment', dict[str, Any]], None]] = None,
+        report_end: Optional[
+            Callable[['SymEnvironment', dict[str, Any]], None]] = None,
+        pushdata: Optional[
+            Callable[['SymEnvironment', 'ExecContext', 'ScriptData',
+                      'PluginStackHelperFunctions', dict[str, Any]],
+                     None]] = None,
+        pre_opcode: Optional[
+            Callable[['SymEnvironment', 'ExecContext', 'OpCode',
+                      'PluginStackHelperFunctions', dict[str, Any]],
+                     bool]] = None,
+        post_opcode: Optional[
+            Callable[['SymEnvironment', 'ExecContext', 'OpCode',
+                      'PluginStackHelperFunctions', dict[str, Any]],
+                     None]] = None,
+        pre_finalize: Optional[
+            Callable[['SymEnvironment', 'ExecContext', dict[str, Any]],
+                     None]] = None,
+        post_finalize: Optional[
+            Callable[['SymEnvironment', 'ExecContext', dict[str, Any]],
+                     None]] = None,
+    ) -> None:
+        assert g_current_plugin_name is not None, \
+            "expected to be called from within PluginContext()"
 
-        if self.sigversion == SigVersion.TAPSCRIPT:
-            mode_ops |= tapscript_ops
-            mode_ops -= set(disabled_in_tapscript)
+        pname = g_current_plugin_name
 
-        for pname in self.op_plugins:
-            name = op_plugin_name(os.path.basename(pname))
-            mode_ops |= set(g_opcodes_for_mode.get(name, []))
+        if pname not in self._plugin_module_state:
+            self._plugin_module_state[pname] = {}
 
-        mode_ops |= self._explicitly_enablded_opcodes
+        errmsg = 'hook is already registered for the plugin'
 
-        return tuple(mode_ops)
+        if parse_input_file:
+            if self._parse_input_file_hook:
+                raise ValueError(
+                    'parse_input_file hook is already registered by some plugin')
+
+            self._parse_input_file_hook = parse_input_file
+            self._parse_input_file_hook_plugin_name = pname
+
+        if plugin_settings:
+            if pname in self._plugin_settings_hooks:
+                raise ValueError(errmsg)
+
+            self._plugin_settings_hooks[pname] = plugin_settings
+
+        if plugin_comment:
+            if pname in self._plugin_comment_hooks:
+                raise ValueError(errmsg)
+
+            self._plugin_comment_hooks[pname] = plugin_comment
+
+        if report_start:
+            if pname in self._report_start_hooks:
+                raise ValueError(errmsg)
+
+            self._report_start_hooks[pname] = report_start
+
+        if report_end:
+            if pname in self._report_end_hooks:
+                raise ValueError(errmsg)
+
+            self._report_end_hooks[pname] = report_end
+
+        if script_failure:
+            if pname in self._script_failure_hooks:
+                raise ValueError(errmsg)
+
+            self._script_failure_hooks[pname] = script_failure
+
+        if pushdata:
+            if pname in self._pushdata_hooks:
+                raise ValueError(errmsg)
+
+            self._pushdata_hooks[pname] = pushdata
+
+        if pre_opcode:
+            if pname in self._pre_opcode_hooks:
+                raise ValueError(errmsg)
+
+            self._pre_opcode_hooks[pname] = pre_opcode
+
+        if post_opcode:
+            if pname in self._post_opcode_hooks:
+                raise ValueError(errmsg)
+
+            self._post_opcode_hooks[pname] = post_opcode
+
+        if pre_finalize:
+            if pname in self._pre_finalize_hooks:
+                raise ValueError(errmsg)
+
+            self._pre_finalize_hooks[pname] = pre_finalize
+
+        if post_finalize:
+            if pname in self._post_finalize_hooks:
+                raise ValueError(errmsg)
+
+            self._post_finalize_hooks[pname] = post_finalize
+
+    def call_parse_input_file_hook(self) -> Optional['ScriptInfo']:
+        if hook_fun := self._parse_input_file_hook:
+            plugin_name = self._parse_input_file_hook_plugin_name
+            with PluginContext(plugin_name):
+                return hook_fun(self, self._plugin_module_state[plugin_name])
+
+        return None
+
+    def call_plugin_settings_hook(self, plugin_name: str, value_str: str) -> bool:
+        if hook_fun := self._plugin_settings_hooks.get(plugin_name):
+            with PluginContext(plugin_name):
+                hook_fun(self, value_str, self._plugin_module_state[plugin_name])
+            return True
+
+        return False
+
+    def call_plugin_comment_hook(self, plugin_name: str, comment_text: str,
+                                 op_pos: int, line_no: int
+                                 ) -> None:
+        if hook_fun := self._plugin_comment_hooks.get(plugin_name):
+            with PluginContext(plugin_name):
+                hook_fun(self, comment_text, op_pos, line_no,
+                         self._plugin_module_state[plugin_name])
+
+    def call_report_start_hooks(self) -> None:
+        for pname, hook_fun in self._report_start_hooks.items():
+            with PluginContext(pname):
+                hook_fun(self, self._plugin_module_state[pname])
+
+    def call_report_end_hooks(self) -> None:
+        for pname, hook_fun in self._report_end_hooks.items():
+            with PluginContext(pname):
+                hook_fun(self, self._plugin_module_state[pname])
+
+    def call_script_failure_hooks(self, ctx: 'ExecContext') -> None:
+        for pname, hook_fun in self._script_failure_hooks.items():
+            with PluginContext(pname):
+                hook_fun(self, ctx, self._plugin_module_state[pname])
+
+    def call_pushdata_hooks(self, ctx: 'ExecContext', scrd: 'ScriptData',
+                            phf: 'PluginStackHelperFunctions'
+                            ) -> None:
+        for pname, hook_fun in self._pushdata_hooks.items():
+            with PluginContext(pname):
+                hook_fun(self, ctx, scrd, phf, self._plugin_module_state[pname])
+
+    def call_pre_opcode_hooks(self, ctx: 'ExecContext', op: 'OpCode',
+                              phf: 'PluginStackHelperFunctions'
+                              ) -> bool:
+        for pname, hook_fun in self._pre_opcode_hooks.items():
+            with PluginContext(pname):
+                if hook_fun(self, ctx, op, phf, self._plugin_module_state[pname]):
+                    return True
+
+        return False
+
+    def call_post_opcode_hooks(self, ctx: 'ExecContext', op: 'OpCode',
+                               phf: 'PluginStackHelperFunctions'
+                               ) -> None:
+        for pname, hook_fun in self._post_opcode_hooks.items():
+            with PluginContext(pname):
+                hook_fun(self, ctx, op, phf, self._plugin_module_state[pname])
+
+    def call_pre_finalize_hooks(self, ctx: 'ExecContext') -> None:
+        for pname, hook_fun in self._pre_finalize_hooks.items():
+            with PluginContext(pname):
+                hook_fun(self, ctx, self._plugin_module_state[pname])
+
+    def call_post_finalize_hooks(self, ctx: 'ExecContext') -> None:
+        for pname, hook_fun in self._post_finalize_hooks.items():
+            with PluginContext(pname):
+                hook_fun(self, ctx, self._plugin_module_state[pname])
 
     def load_plugin_modules(self) -> None:
-        for ppath in self._op_plugins:
+        assert not self._plugin_modules
+
+        for ppath in self._plugins:
             plugin_filename = os.path.basename(ppath)
-            name = op_plugin_name(plugin_filename)
-            name = f'{PLUGIN_NAME_PREFIX}_{plugin_filename[:-13]}'
-            module_name = f'bsst.{name}'
-            if not g_optional_modules_register.get(name):
-                spec = importlib.util.spec_from_file_location(module_name, ppath)
-                if spec is None:
-                    raise BSSTPluginLoadError(
-                        f'cannot load plugin \'{ppath}\': spec_from_file_location failed')
+            if not plugin_filename.endswith(PLUGIN_FILE_SUFFIX):
+                raise ValueError(f"plugin file name must end with '{PLUGIN_FILE_SUFFIX}'")
 
-                if spec.loader is None:
-                    raise BSSTPluginLoadError(f'cannot load plugin \'{ppath}\': spec.loader is None')
+            plugin_name = PLUGIN_NAME_PREFIX + plugin_filename[:-len(PLUGIN_FILE_SUFFIX)]
+            module_name = f'bsst.{plugin_name}'
 
-                plugin_module = importlib.util.module_from_spec(spec)
-                if plugin_module is None:
-                    raise BSSTPluginLoadError(f'cannot load plugin \'{ppath}\': module_from_spec failed')
+            if module_name in sys.modules:
+                continue
 
-                sys.modules[module_name] = plugin_module
-                spec.loader.exec_module(plugin_module)
+            if plugin_name in self._plugin_module_state:
+                raise ValueError('duplicate plugin name')
 
-                with ModeNameForOpcodes(name):
-                    plugin_module.init(sys.modules[__name__])
+            spec = importlib.util.spec_from_file_location(module_name, ppath)
+            if spec is None:
+                raise BSSTPluginLoadError(
+                    f'cannot load plugin \'{ppath}\': spec_from_file_location failed')
 
-                self._op_plugin_modules.add(plugin_module)
+            if spec.loader is None:
+                raise BSSTPluginLoadError(f'cannot load plugin \'{ppath}\': spec.loader is None')
 
-                g_optional_modules_register[name] = True
+            plugin_module = importlib.util.module_from_spec(spec)
+            if plugin_module is None:
+                raise BSSTPluginLoadError(f'cannot load plugin \'{ppath}\': module_from_spec failed')
+
+            sys.modules[module_name] = plugin_module
+            spec.loader.exec_module(plugin_module)
+            with PluginContext(plugin_name):
+                self._plugin_module_state[plugin_name] = \
+                    plugin_module.init(self)
+
+            self._plugin_modules.add(plugin_module)
 
     def z3_tracked_assertion_line_usagenum(self, lineno_str: str) -> int:
         usageno = self._z3_tracked_assertion_lines.get(lineno_str, 0)
@@ -1354,19 +1594,10 @@ MAX_SCRIPT_SIZE = 10000
 
 SCRIPTNUM_DEFAULT_SIZE = 4
 
-_OP_TABLE: dict[str, 'OpCode'] = {}
-
 MAX_SCRIPTNUM_INT = 0x7fffffff
 MIN_SCRIPTNUM_INT = -0x7fffffff
 
 SHA256_MAX = 0x1FFFFFFFFFFFFFFF
-
-
-def op_plugin_name(plugin_filename: str) -> str:
-    if not plugin_filename.endswith(PLUGIN_FILE_SUFFIX):
-        raise ValueError(f"plugin file name must end with '{PLUGIN_FILE_SUFFIX}'")
-
-    return f'{PLUGIN_NAME_PREFIX}_{plugin_filename[:-13]}'
 
 
 def IntSeqSortRef() -> 'z3.SeqSortRef':
@@ -1417,29 +1648,29 @@ def FreshConst(sort: Any, prefix: str) -> 'z3.ExprRef':
 
 SCRIPT_FAILURE_PREFIX_SOLVER = ':solver:'
 
-g_optional_modules_register = {'z3': False, 'secp256k1': False}
-
 
 class SupportsFailureCodeCallbacks(Protocol):
     def get_name_suffix(self) -> str:
         ...
 
 
+# This dictionary is filled on startup, when opcode instances are
+# created. It is later copied to the environment, so each environment
+# will have its own list of opcodes
+g_default_opcode_table: dict[str, 'OpCode'] = {}
+
+# Below global variables are either set and restored within context managers,
+# or set and then cleared within functions with try/finally guard
 g_current_sym_environment: SymEnvironment | None = None
-
-g_secp256k1_handle: ctypes.CDLL | None = None
-g_secp256k1_context: Any = None
-g_secp256k1_has_xonly_pubkeys = False
-
 g_is_in_processing = False
-
 g_do_process_data_reference_names = False
 g_current_exec_context: Optional['ExecContext'] = None
 g_current_op: Optional['OpCode'] = None
 g_skip_assertion_for_enforcement_condition: Optional[tuple['SymData', int]] = None
-g_check_op_start_time = 0.0
-g_mode_name_for_opcodes = ''
-g_opcodes_for_mode: dict[str, list['OpCode']] = {}
+g_mode_tags_for_opcodes: Optional[tuple[str, ...]] = None
+g_data_reference_names_table: dict[str, dict[str, tuple['SymData', 'ExecContext']]] = {}
+g_seen_named_values: set[str] = set()
+g_current_plugin_name: str | None = None
 
 
 def maybe_randomize_z3_seeds() -> None:
@@ -2346,9 +2577,9 @@ def _z3check(  # noqa
     if s_result == z3.unsat:
         unsat_core = solver.unsat_core()
         if not unsat_core:
-            raise ScriptFailure('untracked constraint check failed')
+            raise ScriptFailureSolver('untracked constraint check failed')
 
-        raise ScriptFailure(
+        raise ScriptFailureSolver(
             SCRIPT_FAILURE_PREFIX_SOLVER + ' '
             + ', '.join(str(f) for f in unsat_core))
 
@@ -2508,10 +2739,11 @@ def is_cond_possible(  # noqa
 
     failcodes: list[tuple[int, str]] = []
     try:
-        Check(cond, sd_failcode())
         z3check(force_check=True)
         check_ok = True
-    except ScriptFailure as sf:
+    except ScriptFailure:
+        check_ok = False
+    except ScriptFailureSolver as sf:
         ignored_code = ''
         for code, pc in parse_failcodes(str(sf)):
             if code.startswith('check_possible'):
@@ -2545,14 +2777,12 @@ def is_cond_possible(  # noqa
 
 
 def maybe_report_elapsed_time() -> None:
-    global g_check_op_start_time
-
     env = cur_env()
 
     if env.log_solving_attempts:
         end = time.monotonic()
-        env.solving_log(f"... {end-g_check_op_start_time:.02f} seconds")
-        g_check_op_start_time = end
+        env.solving_log(f"... {end-env.check_op_start_time:.02f} seconds")
+        env.check_op_start_time = end
 
         if env.log_solving_attempts_to_stderr:
             env.solving_log("\n")
@@ -2623,10 +2853,12 @@ def sym_CSHA256_Load(sha256ctx: 'SymData', bits_load: 'z3.ArithRef',
 
 
 def is_static_pubkey_valid(pub: bytes) -> bool:
-    assert g_secp256k1_handle is not None
+    env = cur_env()
+
+    assert env.secp256k1_handle is not None
     buf = ctypes.create_string_buffer(64)
-    is_ok = g_secp256k1_handle.secp256k1_ec_pubkey_parse(
-            g_secp256k1_context, buf, pub, len(pub))
+    is_ok = env.secp256k1_handle.secp256k1_ec_pubkey_parse(
+            env.secp256k1_context, buf, pub, len(pub))
     assert is_ok in (1, 0)
     return bool(is_ok)
 
@@ -2656,7 +2888,7 @@ def add_pubkey_constraints(vchPubKey: 'SymData'
                   err_invalid_pubkey())
 
     if vchPubKey.is_static:
-        if g_secp256k1_handle is not None:
+        if env.secp256k1_handle is not None:
             return is_static_pubkey_valid(vchPubKey.as_bytes())
 
     return Or(And(pub_len == 33, Or(pub[0] == 2, pub[0] == 3)),
@@ -2690,11 +2922,11 @@ def add_xonly_pubkey_constraints(vchPubKey: 'SymData', *,
         maybe_upgradeable_pub = vchPubKey.Length() != 32
 
     if vchPubKey.is_static and len(vchPubKey.as_bytes()) == 32:
-        if g_secp256k1_has_xonly_pubkeys:
+        if env.secp256k1_has_xonly_pubkeys:
             buf = ctypes.create_string_buffer(64)
-            assert g_secp256k1_handle is not None
-            is_ok = g_secp256k1_handle.secp256k1_xonly_pubkey_parse(
-                g_secp256k1_context, buf, vchPubKey.as_bytes())
+            assert env.secp256k1_handle is not None
+            is_ok = env.secp256k1_handle.secp256k1_xonly_pubkey_parse(
+                env.secp256k1_context, buf, vchPubKey.as_bytes())
             assert is_ok in (1, 0)
             if is_ok != 1:
                 raise ScriptFailure('invalid pubkey')
@@ -3027,23 +3259,42 @@ def CurrentExecContext(ctx: Optional['ExecContext']) -> Generator[None, None, No
         g_current_exec_context = prev_ctx
 
 
-OPCODE_MODES = ('bitcoin', 'bitcoin_tapscript',
-                'elements', 'elements_tapscript')
+OPCODE_TAGS = {'bitcoin', 'elements', 'base', 'tapscript'}
 
 
 @contextmanager
-def ModeNameForOpcodes(name: str) -> Generator[None, None, None]:
-    global g_mode_name_for_opcodes
+def ModeTagsForOpcodes(*tags: str) -> Generator[None, None, None]:
+    global g_mode_tags_for_opcodes
 
-    if name not in OPCODE_MODES and not name.startswith(PLUGIN_NAME_PREFIX):
-        raise ValueError('unrecognized mode name for opcodes')
+    tags_set = set(tags)
 
-    prev_name = g_mode_name_for_opcodes
-    g_mode_name_for_opcodes = name
+    if len(tags_set) != len(tags):
+        raise ValueError('duplicate tag')
+
+    if len(tags) == 1 and tags[0].startswith(PLUGIN_NAME_PREFIX):
+        pass
+    elif not tags_set.issubset(OPCODE_TAGS):
+        raise ValueError('unrecognized tag for opcodes')
+
+    prev_tags = g_mode_tags_for_opcodes
+    g_mode_tags_for_opcodes = tuple(tags_set)
     try:
         yield
     finally:
-        g_mode_name_for_opcodes = prev_name
+        g_mode_tags_for_opcodes = prev_tags
+
+
+@contextmanager
+def PluginContext(name: str) -> Generator[None, None, None]:
+    global g_current_plugin_name
+
+    prev_name = g_current_plugin_name
+    g_current_plugin_name = name
+    with ModeTagsForOpcodes(f'{PLUGIN_NAME_PREFIX}{name}'):
+        try:
+            yield
+        finally:
+            g_current_plugin_name = prev_name
 
 
 def cur_context() -> 'ExecContext':
@@ -3062,7 +3313,6 @@ def cur_env() -> 'SymEnvironment':
 def CurrentOp(op_or_sd: Optional[Union['OpCode', 'ScriptData']]
               ) -> Generator[None, None, None]:
     global g_current_op
-    global g_check_op_start_time
 
     if isinstance(op_or_sd, OpCode):
         op = op_or_sd
@@ -3072,7 +3322,7 @@ def CurrentOp(op_or_sd: Optional[Union['OpCode', 'ScriptData']]
     env = cur_env()
 
     if env.log_solving_attempts:
-        g_check_op_start_time = time.monotonic()
+        env.check_op_start_time = time.monotonic()
         if env.do_progressive_z3_checks and \
                 (op_or_sd is None or isinstance(op_or_sd, OpCode)):
             ctx = cur_context()
@@ -3090,23 +3340,31 @@ def CurrentOp(op_or_sd: Optional[Union['OpCode', 'ScriptData']]
         if env.do_progressive_z3_checks and env.log_solving_attempts and \
                 isinstance(op_or_sd, OpCode):
             end = time.monotonic()
-            env.solving_log(f"... {end-g_check_op_start_time:.02f} seconds\n")
+            env.solving_log(f"... {end-env.check_op_start_time:.02f} seconds\n")
 
 
 @total_ordering
 class OpCode:
 
-    def __init__(self, code: int, name: str) -> None:
+    def __init__(self, code: int, *names: str) -> None:
+        assert g_mode_tags_for_opcodes is not None, \
+            "must be called within ModeTagsForOpcodes() context"
+
         self._code = code
-        self._name = name
+        self._name = names[0]
+        self._aliases = names[1:]
+        self._mode_tags = g_mode_tags_for_opcodes
 
-        assert name not in _OP_TABLE
-        _OP_TABLE[name] = self
-        assert g_mode_name_for_opcodes
+        if env := g_current_sym_environment:
+            mode_dict = env.opcode_table
+        else:
+            mode_dict = g_default_opcode_table
 
-        ops = g_opcodes_for_mode.get(g_mode_name_for_opcodes, [])
-        ops.append(self)
-        g_opcodes_for_mode[g_mode_name_for_opcodes] = ops
+        if any(n in mode_dict for n in names):
+            raise ValueError('duplicate name or alias')
+
+        for name in names:
+            mode_dict[name] = self
 
     @property
     def name(self) -> str:
@@ -3115,6 +3373,29 @@ class OpCode:
     @property
     def code(self) -> int:
         return self._code
+
+    def is_enabled(self, env: Optional['SymEnvironment'] = None) -> bool:
+        if not env:
+            env = cur_env()
+
+        if self.name in env.explicitly_enabled_opcodes:
+            return True
+
+        if len(self._mode_tags) == 1 and \
+                self._mode_tags[0].startswith(PLUGIN_NAME_PREFIX):
+            return True
+
+        if env.is_elements:
+            current_tags = {'elements'}
+        else:
+            current_tags = {'bitcoin'}
+
+        if env.sigversion == SigVersion.TAPSCRIPT:
+            current_tags.add('tapscript')
+        else:
+            current_tags.add('base')
+
+        return current_tags.issubset(set(self._mode_tags))
 
     def __eq__(self, other: Any) -> bool:
         if isinstance(other, ScriptData):
@@ -3148,12 +3429,10 @@ class OpCode:
 
 # Bitcoin opcodes
 
-with ModeNameForOpcodes('bitcoin'):
+with ModeTagsForOpcodes('bitcoin', 'elements', 'base', 'tapscript'):
     OP_1NEGATE = OpCode(0x4f, '1NEGATE')
-    OP_0 = OpCode(0x00, '0')
-    _OP_TABLE['FALSE'] = OP_0
-    OP_1 = OpCode(0x51, '1')
-    _OP_TABLE['TRUE'] = OP_1
+    OP_0 = OpCode(0x00, '0', 'FALSE')
+    OP_1 = OpCode(0x51, '1', 'TRUE')
     OP_2 = OpCode(0x52, '2')
     OP_3 = OpCode(0x53, '3')
     OP_4 = OpCode(0x54, '4')
@@ -3228,17 +3507,17 @@ with ModeNameForOpcodes('bitcoin'):
     OP_HASH256 = OpCode(0xaa, 'HASH256')
     OP_CHECKSIG = OpCode(0xac, 'CHECKSIG')
     OP_CHECKSIGVERIFY = OpCode(0xad, 'CHECKSIGVERIFY')
+
+with ModeTagsForOpcodes('bitcoin', 'elements', 'base'):
     OP_CHECKMULTISIG = OpCode(0xae, 'CHECKMULTISIG')
     OP_CHECKMULTISIGVERIFY = OpCode(0xaf, 'CHECKMULTISIGVERIFY')
 
-with ModeNameForOpcodes('bitcoin_tapscript'):
+with ModeTagsForOpcodes('bitcoin', 'elements', 'tapscript'):
     OP_CHECKSIGADD = OpCode(0xba, 'CHECKSIGADD')
-
-disabled_in_tapscript = (OP_CHECKMULTISIG, OP_CHECKMULTISIGVERIFY)
 
 # Elements opcodes
 
-with ModeNameForOpcodes('elements'):
+with ModeTagsForOpcodes('elements', 'base', 'tapscript'):
     OP_CAT = OpCode(0x7e, 'CAT')
     OP_SUBSTR = OpCode(0x7f, 'SUBSTR')
     OP_LEFT = OpCode(0x80, 'LEFT')
@@ -3254,7 +3533,7 @@ with ModeNameForOpcodes('elements'):
     OP_CHECKSIGFROMSTACKVERIFY = OpCode(0xc2, 'CHECKSIGFROMSTACKVERIFY')
     OP_SUBSTR_LAZY = OpCode(0xc3, 'SUBSTR_LAZY')
 
-with ModeNameForOpcodes('elements_tapscript'):
+with ModeTagsForOpcodes('elements', 'tapscript'):
     OP_SHA256INITIALIZE = OpCode(0xc4, 'SHA256INITIALIZE')
     OP_SHA256UPDATE = OpCode(0xc5, 'SHA256UPDATE')
     OP_SHA256FINALIZE = OpCode(0xc6, 'SHA256FINALIZE')
@@ -3370,14 +3649,6 @@ class ScriptInfo:
     def bsst_assumptions_for(self, dph_name: str
                              ) -> tuple[BsstAssumption, ...] | None:
         return self._assumption_table.get(dph_name)
-
-
-g_data_reference_names_table: dict[str, dict[str, tuple['SymData', 'ExecContext']]] = {}
-g_seen_named_values: set[str] = set()
-
-
-class ScriptFailure(Exception):
-    ...
 
 
 def op_pos_repr(pc: int) -> str:
@@ -4466,6 +4737,8 @@ class ExecContext(SupportsFailureCodeCallbacks):
         self.exec_state_log[pc] = self.exec_state.clone()
         self.failure = (pc, err)
 
+        env.call_script_failure_hooks(self)
+
     @property
     def failure_info(self) -> tuple[int, list[str]] | str:
         if not self.failure:
@@ -5513,7 +5786,7 @@ def apply_bsst_assn(ctx: ExecContext, assn: BsstAssertion | BsstAssumption,
 
     cond = assn.fun(target)
 
-    amsg = f'@L{assn.line_no} for {target_txt}: "{assn.text}"'
+    amsg = f'@L{assn.line_no} for {target_txt}: {assn.text}'
 
     env.solving_log_ensure_newline()
 
@@ -5558,9 +5831,32 @@ def check_bsst_assertions_and_assumptions(ctx: ExecContext) -> None:  # noqa
 def symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:
     try:
         with CurrentOp(op_or_sd):
-            was_executed = _symex_op(ctx, op_or_sd)
-            if was_executed and all(ctx.vfExec):
-                check_bsst_assertions_and_assumptions(ctx)
+            was_executed, popped_or_erased_values = _symex_op(ctx, op_or_sd)
+            if was_executed:
+
+                combined_stack_len = len(ctx.stack) + len(ctx.altstack)
+                if combined_stack_len > MAX_STACK_SIZE:
+                    raise ScriptFailure(
+                        f'stack overflow, stack len {len(ctx.stack)}, '
+                        f'altstack len {len(ctx.altstack)}')
+
+                if combined_stack_len > ctx.max_combined_stack_len:
+                    ctx.num_expunged_witnesses = max(
+                        ctx.num_expunged_witnesses,
+                        combined_stack_len - len(ctx.used_witnesses)
+                    )
+                    ctx.max_combined_stack_len = combined_stack_len
+
+                for val in popped_or_erased_values:
+                    if val.refcount == 0:
+                        neighbors = val.get_refcount_neighbors()
+                        if not any(nb.refcount > 0 for nb in neighbors):
+                            for nb in neighbors:
+                                ctx.unused_values.add(nb)
+
+                if all(ctx.vfExec):
+                    check_bsst_assertions_and_assumptions(ctx)
+
     except ScriptFailure as sf:
         ctx.register_failure(ctx.pc, str(sf))
         was_executed = False
@@ -5569,7 +5865,7 @@ def symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:
 
 
 @dataclass
-class PluginHelperFunctions:
+class PluginStackHelperFunctions:
     stacktop: Callable[[int], 'SymData']
     stacktop64: Callable[[int], 'SymData']
     push: Callable[['SymData'], None]
@@ -5577,7 +5873,8 @@ class PluginHelperFunctions:
     erase: Callable[[int], None]
 
 
-def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
+def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
+              ) -> tuple[bool, Iterable[SymData]]:
 
     tx = ctx.tx
 
@@ -5663,6 +5960,10 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
             if vlen is not None:
                 Check(vlen <= MAX_SCRIPT_ELEMENT_SIZE, err_data_too_long())
 
+    stack_helper_functions = PluginStackHelperFunctions(
+        stacktop=stacktop, stacktop64=stacktop64,
+        push=push, popstack=popstack, erase=erase)
+
     fExec = all(ctx.vfExec)
 
     r: SymData
@@ -5674,9 +5975,9 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
         if fExec or (OP_IF <= op and op <= OP_ENDIF):
             pass
         else:
-            return False
+            return False, ()
     elif not fExec:
-        return False
+        return False, ()
 
     if isinstance(op_or_sd, ScriptData):
         def scope() -> None:
@@ -5699,9 +6000,22 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
 
             push(data)
 
+            env.call_pushdata_hooks(ctx, sd, stack_helper_functions)
+
         scope()
-    elif op == OP_NOP:
+
+        return True, popped_or_erased_values
+
+    if env.call_pre_opcode_hooks(ctx, op, stack_helper_functions):
+        # Opcode was handled by the plugin
+        return True, popped_or_erased_values
+
+    # Opcode handling:
+
+    if op == OP_NOP:
+
         pass
+
     elif op == OP_0:
 
         push(SymData(name=op.name, static_value=b''))
@@ -7884,37 +8198,11 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData) -> bool:  # noqa
 
         scope()
     else:
-        for plugin in env.get_loaded_op_plugins():
-            phf = PluginHelperFunctions(
-                stacktop=stacktop, stacktop64=stacktop64,
-                push=push, popstack=popstack, erase=erase)
+        raise ScriptFailure(f'unhandled opcode: {op}')
 
-            if plugin.exec_opcode(ctx, env, op, phf):
-                break
-        else:
-            raise ScriptFailure(f'unhandled opcode: {op}')
+    env.call_post_opcode_hooks(ctx, op, stack_helper_functions)
 
-    combined_stack_len = len(ctx.stack) + len(ctx.altstack)
-    if combined_stack_len > MAX_STACK_SIZE:
-        raise ScriptFailure(
-            f'stack overflow, stack len {len(ctx.stack)}, '
-            f'altstack len {len(ctx.altstack)}')
-
-    if combined_stack_len > ctx.max_combined_stack_len:
-        ctx.num_expunged_witnesses = max(
-            ctx.num_expunged_witnesses,
-            combined_stack_len - len(ctx.used_witnesses)
-        )
-        ctx.max_combined_stack_len = combined_stack_len
-
-    for val in popped_or_erased_values:
-        if val.refcount == 0:
-            neighbors = val.get_refcount_neighbors()
-            if not any(nb.refcount > 0 for nb in neighbors):
-                for nb in neighbors:
-                    ctx.unused_values.add(nb)
-
-    return True
+    return True, popped_or_erased_values
 
 
 def symex_script() -> None:
@@ -8208,9 +8496,9 @@ def parse_script_data(text: str, *, die: Callable[[str], NoReturn],  # noqa
 
     return None
 
-def get_opcodes(script_lines: Iterable[str],    # noqa
-                allow_nonstandard_size_scriptnums: bool = False
-                ) -> ScriptInfo:
+def parse_script_lines(script_lines: Iterable[str],    # noqa
+                       allow_nonstandard_size_scriptnums: bool = False
+                       ) -> ScriptInfo:
 
     env = cur_env()
 
@@ -8238,7 +8526,9 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
 
         assn_check_fun: Optional[Callable[['SymData'], 'z3.BoolRef']] = None
         is_for_size = False
-        assn_text = ''
+        bsst_comment_type = ''
+        bsst_comment_text = ''
+        bsst_comment_arg = ''
         assn_dph_name = ''
         assn_dref_name = ''
         data_reference = ''
@@ -8250,15 +8540,32 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
             if m := re.match('\\s*=>(\\S+)', comment):
                 data_reference = m.group(1)
 
-            if m := re.match('\\s*bsst-(assert|assume)(-size)?([^:]*):(.*)', comment):
+            if m := re.match('\\s*bsst-(assert|assume|plugin)(-size)?([^:]*):(.*)',
+                             comment):
+                bsst_comment_type = m.group(1)
                 is_for_size = bool(m.group(2))
-                assn_arg = m.group(3)
-                assn_text = m.group(4).strip()
-                if m.group(1) == 'assume':
-                    if not (assn_arg.startswith('(') and assn_arg.endswith(')')):
+                bsst_comment_arg = m.group(3)
+                bsst_comment_text = m.group(4).strip()
+
+                if bsst_comment_type == 'plugin':
+                    if is_for_size:
+                        die('bsst-plugin-size is meaningless')
+
+                    if not (bsst_comment_arg.startswith('(') and
+                            bsst_comment_arg.endswith(')')):
+                        die('unexpected format for bsst-plugin')
+
+                    bsst_comment_arg = bsst_comment_arg[1:-1]
+
+                    if bsst_comment_arg not in env._plugin_module_state:
+                        die('plugin with specified name is not loaded')
+
+                elif bsst_comment_type == 'assume':
+                    if not (bsst_comment_arg.startswith('(') and
+                            bsst_comment_arg.endswith(')')):
                         die('unexpected format for bsst-assume')
 
-                    assn_dph_name = assn_arg[1:-1]
+                    assn_dph_name = bsst_comment_arg[1:-1]
 
                     if not assn_dph_name.startswith('$') or \
                             not assn_dph_name[1:].isidentifier():
@@ -8270,10 +8577,13 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
 
                     types_used = typedict[assn_dph_name]
                 else:
-                    if assn_arg != '':
-                        if not (assn_arg.startswith('(') and assn_arg.endswith(')')):
+                    assert bsst_comment_type == 'assert'
+
+                    if bsst_comment_arg != '':
+                        if not (bsst_comment_arg.startswith('(')
+                                and bsst_comment_arg.endswith(')')):
                             die('unexpected format for bsst-assert')
-                        assn_dref_name = assn_arg[1:-1]
+                        assn_dref_name = bsst_comment_arg[1:-1]
                         if not assn_dref_name.startswith('&'):
                             if not re.match('wit(\\d+)$', assn_dref_name):
                                 die('only data references and witnesses are recognized '
@@ -8291,9 +8601,10 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
                             types_used_in_assumptions[int(is_for_size)].get(
                                 body[-1].name) or set())
 
-                assn_check_fun = parse_bsst_assn(
-                    assn_text, die=die, env=env,
-                    types_used=types_used, is_for_size=is_for_size)
+                if bsst_comment_type != 'plugin':
+                    assn_check_fun = parse_bsst_assn(
+                        bsst_comment_text, die=die, env=env,
+                        types_used=types_used, is_for_size=is_for_size)
 
         for op_str in line.split():
             got_angle_brackets = False
@@ -8314,25 +8625,17 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
             elif got_angle_brackets:
                 die(f'unexpected value in angle brackets: {op_str}')
             else:
-                op_str = op_str.upper()
+                op_str = op_name = op_str.upper()
                 if op_str.startswith('OP_'):
-                    maybe_op = _OP_TABLE.get(op_str[3:])
-                else:
-                    maybe_op = _OP_TABLE.get(op_str)
+                    op_name = op_str[3:]
 
-                if maybe_op is None:
+                if op_name not in env.opcode_table:
                     die(f'unknown opcode {op_str}')
 
-                op_or_sd = maybe_op
+                op_or_sd = env.opcode_table[op_name]
 
-                mode = 'elements' if env.is_elements else 'bitcoin'
-                if env.sigversion == SigVersion.TAPSCRIPT:
-                    mode = f'{mode} (tapscript)'
-                else:
-                    mode = f'{mode} (non-tapscript)'
-
-                if op_or_sd not in env.get_enabled_opcodes():
-                    die(f'opcode {op_str} is not valid for {mode}')
+                if not op_or_sd.is_enabled(env):
+                    die(f'opcode {op_str} is not enabled with current settings')
 
             line_no_table.append(line_no)
             body.append(op_or_sd)
@@ -8364,12 +8667,16 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
             seen_data_reference_names[data_reference] = line_no
             data_reference_positions[op_pos] = data_reference
 
+        if bsst_comment_type == 'plugin':
+            env.call_plugin_comment_hook(bsst_comment_arg, bsst_comment_text,
+                                         op_pos, line_no)
+
         if assn_check_fun:
             if assn_dph_name:
                 assn_funcs = assumption_table.get(assn_dph_name, [])
                 assn_funcs.append(BsstAssumption(
                     fun=assn_check_fun, is_for_size=is_for_size,
-                    line_no=line_no, text=assn_text))
+                    line_no=line_no, text=bsst_comment_text))
                 assumption_table[assn_dph_name] = assn_funcs
             else:
                 if op_pos < 0:
@@ -8378,7 +8685,7 @@ def get_opcodes(script_lines: Iterable[str],    # noqa
                 vac_funcs = assertion_positions.get(op_pos, [])
                 vac_funcs.append(BsstAssertion(
                     fun=assn_check_fun, is_for_size=is_for_size,
-                    line_no=line_no, text=assn_text,
+                    line_no=line_no, text=bsst_comment_text,
                     dref_name=assn_dref_name))
                 assertion_positions[op_pos] = vac_funcs
         else:
@@ -8398,6 +8705,8 @@ def finalize(ctx: ExecContext) -> None:  # noqa
     assert not ctx.failure
     assert ctx.pc == len(env.script_info.body)
 
+    env.call_pre_finalize_hooks(ctx)
+
     try:
         _finalize(ctx, env)
     except ScriptFailure as sf:
@@ -8405,8 +8714,7 @@ def finalize(ctx: ExecContext) -> None:  # noqa
 
     ctx.is_finalized = True
 
-    if hook := env.post_finalize_hook:
-        hook(ctx, env)
+    env.call_post_finalize_hooks(ctx)
 
 
 def _finalize(ctx: ExecContext, env: SymEnvironment) -> None:  # noqa
@@ -8621,21 +8929,19 @@ def _finalize(ctx: ExecContext, env: SymEnvironment) -> None:  # noqa
             global g_skip_assertion_for_enforcement_condition
             g_skip_assertion_for_enforcement_condition = (e.cond, e.pc)
 
-            ename = f'{e.cond} @ {op_pos_info(e.pc)}'
-            if not is_cond_possible(use_as_script_bool(e.cond) == 0,
-                                    e.cond, name=ename,
-                                    fail_msg='  - always true'):
-                e.is_always_true_in_path = True
-
-            g_skip_assertion_for_enforcement_condition = None
+            try:
+                ename = f'{e.cond} @ {op_pos_info(e.pc)}'
+                if not is_cond_possible(use_as_script_bool(e.cond) == 0,
+                                        e.cond, name=ename,
+                                        fail_msg='  - always true'):
+                    e.is_always_true_in_path = True
+            finally:
+                g_skip_assertion_for_enforcement_condition = None
 
         z3_pop_context()
 
 
 def data_reference_names_show() -> None:
-
-    g_seen_named_values.clear()
-
     seen_data_reference_names: set[str] = set()
 
     def get_data_reference_names_rec() -> list[tuple[list[str], str]]:
@@ -8664,8 +8970,12 @@ def data_reference_names_show() -> None:
 
         return result
 
-    for data_reference_names, val in get_data_reference_names_rec():
-        cur_env().write_line(f'\t{" = ".join(data_reference_names)} = {val}')
+    g_seen_named_values.clear()
+    try:
+        for data_reference_names, val in get_data_reference_names_rec():
+            cur_env().write_line(f'\t{" = ".join(data_reference_names)} = {val}')
+    finally:
+        g_seen_named_values.clear()
 
 
 def print_as_header(lines_or_str: str | Iterable[str], level: int = 0,
@@ -8709,6 +9019,8 @@ def print_as_header(lines_or_str: str | Iterable[str], level: int = 0,
 def report() -> None:  # noqa
 
     env = cur_env()
+
+    env.call_report_start_hooks()
 
     enforcements_by_path: dict[tuple['Branchpoint', ...],
                                set['Enforcement']] = {}
@@ -9000,6 +9312,8 @@ def report() -> None:  # noqa
             env.ensure_empty_line()
 
         root_bp.walk_contexts(report_poi, include_failed=True)
+
+    env.call_report_end_hooks()
 
 
 T_CSHA256 = TypeVar('T_CSHA256', bound='CSHA256')
@@ -9475,18 +9789,10 @@ def ripemd160(data: bytes) -> bytes:
     # Produce output.
     return b"".join((h & 0xffffffff).to_bytes(4, 'little') for h in state)
 
-def main() -> None:  # noqa
 
-    env = cur_env()
-    if env.z3_enabled:
-        maybe_randomize_z3_seeds()
-
-        if env.use_parallel_solving and \
-                multiprocessing.get_start_method() != 'fork':
-            sys.stderr.write("Parallel solving is not available, because "
-                             "the system cannot use 'fork' method to start "
-                             "new processes")
-            env.use_parallel_solving = False
+def parse_input_file(env: SymEnvironment) -> ScriptInfo:
+    if si := env.call_parse_input_file_hook():
+        return si
 
     if env.input_file == '-':
         lines = sys.stdin.readlines()
@@ -9494,7 +9800,23 @@ def main() -> None:  # noqa
         with open(env.input_file) as f:
             lines = f.readlines()
 
-    env.script_info = get_opcodes(lines)
+    return parse_script_lines(lines)
+
+
+def main() -> None:  # noqa
+
+    env = cur_env()
+
+    if env.z3_enabled:
+        maybe_randomize_z3_seeds()
+        if env.use_parallel_solving and \
+                multiprocessing.get_start_method() != 'fork':
+            sys.stderr.write("Parallel solving is not available, because "
+                             "the system cannot use 'fork' method to start "
+                             "new processes")
+            env.use_parallel_solving = False
+
+    env.script_info = parse_input_file(env)
 
     if env.script_info.body:
         symex_script()
@@ -9513,50 +9835,38 @@ def sigchld_handler(_signum: int, _frame: Any) -> None:
         pass
 
 
-def try_import_optional_modules() -> None:
-    env = cur_env()
-    if env.z3_enabled:
-        if not g_optional_modules_register['z3']:
-            try:
-                global z3
-                import z3
-            except ImportError as e:
-                raise BSSTInitializationError(f'ERROR: Failed to import z3: {e}\n')
+def try_import_secp256k1(env: SymEnvironment) -> None:
 
-            g_optional_modules_register['z3'] = True
+    if env.secp256k1_handle is not None:
+        return
 
-    global g_secp256k1_handle
-    global g_secp256k1_context
-    global g_secp256k1_has_xonly_pubkeys
-    if not g_optional_modules_register['secp256k1']:
-        path = ctypes.util.find_library('secp256k1')
-        if path is not None:
-            try:
-                g_secp256k1_handle = ctypes.cdll.LoadLibrary(path)
-                g_secp256k1_context = g_secp256k1_handle.secp256k1_context_create(
-                    0x101)  # 0x101 means 'verify' context type
+    path = ctypes.util.find_library('secp256k1')
+    if path is not None:
+        try:
+            env.secp256k1_handle = ctypes.cdll.LoadLibrary(path)
+        except Exception as e:
+            sys.stderr.write(
+                f'ERROR:, secp256k1 library was found at {path}: but loading '
+                f'it retured error {e}')
+            sys.stderr.flush()
+            return
 
-                if g_secp256k1_context is None:
-                    g_secp256k1_handle = None
-                    sys.stderr.write(
-                        f'ERROR:, secp256k1 library was found at {path}: and '
-                        f'loaded, but secp256k1_context_create() failed')
-                else:
-                    g_secp256k1_handle.secp256k1_ec_pubkey_parse.restype = ctypes.c_int
-                    g_secp256k1_handle.secp256k1_ec_pubkey_parse.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_size_t]
-                    if getattr(g_secp256k1_handle, 'secp256k1_xonly_pubkey_parse', None):
-                        g_secp256k1_handle.secp256k1_xonly_pubkey_parse.restype = ctypes.c_int
-                        g_secp256k1_handle.secp256k1_xonly_pubkey_parse.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]
-                        g_secp256k1_has_xonly_pubkeys = True
-            except Exception as e:
-                sys.stderr.write(
-                    f'ERROR:, secp256k1 library was found at {path}: but loading '
-                    f'it retured error {e}')
-                sys.stderr.flush()
+        env.secp256k1_context = env.secp256k1_handle.secp256k1_context_create(
+            0x101)  # 0x101 means 'verify' context type
 
-        g_optional_modules_register['secp256k1'] = True
+        if env.secp256k1_context is None:
+            env.secp256k1_handle = None
+            sys.stderr.write(
+                f'ERROR:, secp256k1 library was found at {path}: and '
+                f'loaded, but secp256k1_context_create() failed')
+            return
 
-    env.load_plugin_modules()
+        env.secp256k1_handle.secp256k1_ec_pubkey_parse.restype = ctypes.c_int
+        env.secp256k1_handle.secp256k1_ec_pubkey_parse.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_size_t]
+        if getattr(env.secp256k1_handle, 'secp256k1_xonly_pubkey_parse', None):
+            env.secp256k1_handle.secp256k1_xonly_pubkey_parse.restype = ctypes.c_int
+            env.secp256k1_handle.secp256k1_xonly_pubkey_parse.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_char_p]
+            env.secp256k1_has_xonly_pubkeys = True
 
 
 def usage() -> None:
@@ -9564,12 +9874,12 @@ def usage() -> None:
     print()
     print("B'SST: Bitcoin-like Script Symbolic Tracer")
     print()
-    print("Copyright (c) 2023 Dmitry Petukhov (https://github.com/dgpv)")
+    print("Copyright (c) 2023 Dmitry Petukhov (https://github.com/dgpv), dp@bsst.dev")
     print()
     print(
-        "Symbolically executes the opcodes, checks constraints that opcodes impose on\n"
-        "values they process, and shows the report with conditions that the script\n"
-        "enforce, possible failures, etc.")
+        "Symbolically executes the opcodes, tracks constraints that opcodes impose on\n"
+        "values they operate on, and shows the report with conditions that the script\n"
+        "enforces, possible failures, possible values for data, etc.")
     print()
     print("IMPORTANT: This program can help uncover problems with the scripts it analyses,\n"
           "BUT it cannot guarantee that there are no problems, inconsistenses, bugs,\n"
@@ -9585,17 +9895,17 @@ def usage() -> None:
     print()
     print(f"Free for non-commercial use. Licensed under Prosperity Public License 3.0.0.\n"
           f"Please run \"{progname} --license\" to display the license.\n")
-    print(f"Contains portions of the code that was originally released under MIT software\n"
+    print(f"Contains portions of the code that were originally released under MIT software\n"
           f"license. These are code of the CSHA256 class (derived from MIT-licensed code,\n"
           f"that was authored by various Bitcoin Core developers) and ripemd160 function\n"
           f"(MIT-licensed code, authored by Pieter Wuille). Please refer to the source code\n"
-          f"in {progname} for more information on these.")
+          f"of {__name__} python module for more information on these.")
     print()
     print("To be able to use Z3 for better analysis, \"z3-solver\" python package\n"
-          "(https://pypi.org/project/z3-solver/) is needed")
+          "(https://pypi.org/project/z3-solver/) is needed.")
     print()
     print("For the analyzer to check validity of statically-known public keys,\n"
-          "secp256k1 library (https://github.com/bitcoin-core/secp256k1/) is needed")
+          "secp256k1 C library (https://github.com/bitcoin-core/secp256k1/) is needed.")
     print()
     print(f"Usage: {progname} [options] [settings]")
     print()
@@ -9616,6 +9926,10 @@ def usage() -> None:
     print("Available settings:")
     print()
     print("  Default value for each setting is shown after the '=' sign")
+    print()
+    print("  Giving value for the same setting twice replaces the value, ")
+    print("  except the case where setting is a \"set\", in which case the ")
+    print("  set of values assigned to the setting gets updated")
     print()
 
     dfl_env = SymEnvironment(is_for_usage_message=True)
@@ -9648,10 +9962,10 @@ def usage() -> None:
 def show_license() -> None:
     print(sys.modules['bsst'].__doc__)
 
-def parse_cmdline_args() -> None:  # noqa
+def parse_cmdline_args(args: Iterable[str]) -> None:  # noqa
     env = cur_env()
 
-    for arg in sys.argv[1:]:
+    for arg in args:
         if not arg.startswith('--'):
             sys.stderr.write("options should start with \"--\"\n")
             sys.exit(-1)
@@ -9677,6 +9991,15 @@ def parse_cmdline_args() -> None:  # noqa
         name = argname.replace('-', '_')
         if not name.isidentifier():
             sys.stderr.write("Incorrect setting name\n")
+            sys.exit(-1)
+
+        if name.startswith('plugin_'):
+            plugin_name = name[7:]
+            if env.call_plugin_settings_hook(plugin_name, value_str):
+                return
+
+            sys.stderr.write(f"Plugin \"{plugin_name}\" is not loaded, "
+                             f"or does not support settings")
             sys.exit(-1)
 
         if not SymEnvironment.is_option(name):
@@ -9749,8 +10072,7 @@ def main_cli() -> None:
 
         try:
             with CurrentEnvironment(SymEnvironment()):
-                parse_cmdline_args()
-                try_import_optional_modules()
+                parse_cmdline_args(sys.argv[1:])
                 main()
         except BSSTError as e:
             print(e)

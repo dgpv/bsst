@@ -2,7 +2,7 @@
 
 import re
 from contextlib import contextmanager
-from typing import Generator, Sequence
+from typing import Generator, Sequence, Any
 
 import bsst
 
@@ -13,7 +13,6 @@ def FreshEnv(*, z3_enabled: bool
     env = bsst.SymEnvironment()
     env.z3_enabled = z3_enabled
     with bsst.CurrentEnvironment(env):
-        bsst.try_import_optional_modules()
         bp = bsst.Branchpoint(pc=0, branch_index=0)
         with bsst.CurrentExecContext(bp.context):
             yield env
@@ -408,8 +407,9 @@ def test_assn_normal(
         env.is_incomplete_script = True
         env.solver_timeout_seconds = 0
 
-        def post_finalize_hook(ctx: bsst.ExecContext,
-                               env: bsst.SymEnvironment) -> None:
+        def post_finalize_hook(env: bsst.SymEnvironment,
+                               ctx: bsst.ExecContext,
+                               state: dict[str, Any]) -> None:
             nonlocal is_ok
 
             mvals: Sequence[int | bytes]
@@ -441,8 +441,9 @@ def test_assn_normal(
 
             is_ok = True
 
-        env.script_info = bsst.get_opcodes(tc_text.split('\n'))
-        env.post_finalize_hook = post_finalize_hook
+        env.script_info = bsst.parse_script_lines(tc_text.split('\n'))
+        with bsst.PluginContext('test_assertions_and_assumptions'):
+            env.set_hooks(post_finalize=post_finalize_hook)
 
         bsst.symex_script()
 
@@ -460,7 +461,7 @@ def test_assn_failing(
         env.is_incomplete_script = True
         env.solver_timeout_seconds = 0
 
-        env.script_info = bsst.get_opcodes(tc_text.split('\n'))
+        env.script_info = bsst.parse_script_lines(tc_text.split('\n'))
 
         bsst.symex_script()
 
@@ -512,7 +513,7 @@ def test_other_failing(tc_no: int, tc_text: str) -> None:
         env.solver_timeout_seconds = 0
 
         try:
-            env.script_info = bsst.get_opcodes(tc_text.split('\n'))
+            env.script_info = bsst.parse_script_lines(tc_text.split('\n'))
         except bsst.BSSTParsingError:
             print("OK")
             return

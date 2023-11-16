@@ -2,7 +2,11 @@
 
 Version 0.1.2.dev0:
 
+* Rework plugin system, now plugins are 'general' in a sense that they can hook into different stages of analysis to observe or change various things
+
 * Add ability to set assertions on stack values and witnesses, and assumptions for data placeholders. Please see newly added "Assertions" and "Assumptions" sections in README. You might also look at `tests/test_assertions_and_assumptions.py` for examples of usage
+
+* Settings that accept a comma-separated set of values, when the setting argument is given twice, now update the set rather than replace it
 
 * Add settings to set comment marker. Note that comments are removed before parsing the rest of the line, and because of this, comment markers cannot appear within quoted strings
 

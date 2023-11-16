@@ -32,7 +32,6 @@ def FreshEnv(*, z3_enabled: bool = False, is_tapscript: bool = False,
         env.sigversion = bsst.SigVersion.BASE
 
     with bsst.CurrentEnvironment(env):
-        bsst.try_import_optional_modules()
         with bsst.CurrentExecContext(env.get_root_branch().context):
             yield env
 
@@ -83,7 +82,7 @@ def do_test_single(script: str, *,
                   nullfail_flag=nullfail_flag
                   ) as env:
 
-        env.script_info = bsst.get_opcodes(script.split('\n'))
+        env.script_info = bsst.parse_script_lines(script.split('\n'))
 
         bsst.symex_script()
         bsst.report()
@@ -375,7 +374,7 @@ def test() -> None:
     do_test_single("DUP INSPECTINPUTISSUANCE SIZE VERIFY TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK 1 INSPECTINPUTISSUANCE SIZE VERIFY 5 PICK FROMALTSTACK EQUALVERIFY 4 PICK FROMALTSTACK EQUALVERIFY 3 PICK FROMALTSTACK EQUALVERIFY 2 PICK FROMALTSTACK EQUAL NOT VERIFY 1 PICK FROMALTSTACK EQUALVERIFY FROMALTSTACK EQUALVERIFY DROP DROP DROP DROP DROP 1 EQUAL",
                    is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_verify', 'check_equalverify'])
     do_test_single("DUP INSPECTINPUTISSUANCE SIZE VERIFY TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK 1 INSPECTINPUTISSUANCE SIZE VERIFY 5 PICK FROMALTSTACK EQUALVERIFY 4 PICK FROMALTSTACK EQUALVERIFY 3 PICK FROMALTSTACK EQUALVERIFY 2 PICK FROMALTSTACK EQUALVERIFY 1 PICK FROMALTSTACK EQUAL NOT VERIFY FROMALTSTACK EQUALVERIFY DROP DROP DROP DROP DROP 1 EQUAL",
-                   is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_verify', 'check_equalverify'])
+                   is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_verify', 'check_equalverify', 'check_scriptnum_minimal_encoding'])
     do_test_single("DUP INSPECTINPUTISSUANCE SIZE VERIFY TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK TOALTSTACK 1 INSPECTINPUTISSUANCE SIZE VERIFY 5 PICK FROMALTSTACK EQUALVERIFY 4 PICK FROMALTSTACK EQUALVERIFY 3 PICK FROMALTSTACK EQUALVERIFY 2 PICK FROMALTSTACK EQUALVERIFY 1 PICK FROMALTSTACK EQUALVERIFY FROMALTSTACK EQUAL NOT VERIFY DROP DROP DROP DROP DROP 1 EQUAL",
                    is_tapscript=True, z3_enabled=True, num_successes=0, expect_failures=['check_final_verify', 'check_verify', 'check_equalverify'])
 
