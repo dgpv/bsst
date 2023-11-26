@@ -5531,7 +5531,6 @@ def apply_bsst_assn(ctx: ExecContext, assn: BsstAssertion | BsstAssumption,
         fc = failcode(f'assertion_at_line_{assn.line_no}')
 
     Check(cond, fc())
-    z3check()
 
     env.solving_log_ensure_newline()
 
