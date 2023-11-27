@@ -1379,13 +1379,19 @@ class SymEnvironment:
 
         return None
 
-    def call_plugin_settings_hook(self, plugin_name: str, value_str: str) -> bool:
+    def call_plugin_settings_hook(self, plugin_name: str, value_str: str
+                                  ) -> tuple[bool, str]:
         if hook_fun := self._plugin_settings_hooks.get(plugin_name):
             with PluginContext(plugin_name):
-                hook_fun(self, value_str, self._plugin_module_state[plugin_name])
-            return True
+                try:
+                    hook_fun(self, value_str, self._plugin_module_state[plugin_name])
+                except ValueError as err:
+                    return False, f'Plugin "{plugin_name}" reported error: {err}'
 
-        return False
+            return True, ''
+
+        return False, (f'Plugin "{plugin_name}" is not loaded, '
+                       f'or does not support settings')
 
     def call_plugin_comment_hook(self, plugin_name: str, comment_text: str,
                                  op_pos: int, line_no: int
@@ -1477,7 +1483,7 @@ class SymEnvironment:
             spec.loader.exec_module(plugin_module)
             with PluginContext(plugin_name):
                 self._plugin_module_state[plugin_name] = \
-                    plugin_module.init(self)
+                    plugin_module.init(self, VERSION)
 
             self._plugin_modules.add(plugin_module)
 
@@ -9995,11 +10001,11 @@ def parse_cmdline_args(args: Iterable[str]) -> None:  # noqa
 
         if name.startswith('plugin_'):
             plugin_name = name[7:]
-            if env.call_plugin_settings_hook(plugin_name, value_str):
+            is_ok, err_str = env.call_plugin_settings_hook(plugin_name, value_str)
+            if is_ok:
                 return
 
-            sys.stderr.write(f"Plugin \"{plugin_name}\" is not loaded, "
-                             f"or does not support settings")
+            sys.stderr.write(f'{err_str}\n')
             sys.exit(-1)
 
         if not SymEnvironment.is_option(name):

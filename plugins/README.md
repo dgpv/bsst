@@ -10,9 +10,11 @@ For example, with `--plugins=plugins/op_example_bsst_plugin.py`, B'SST will reco
 
 There is no stable API for plugins as of now. To write plugins for B'SST your need a good understanding of the internals of `bsst` module. Still, the system of plugins is implemented for those who are ready to deal with studying `bsst` internals and with possible breaking changes in new versions of B'SST
 
-On startup, each loaded plugin will get its `init()` function called, with a
-single argument - an "analysis environment", which is an instance of
-`bsst.SymEnvironment` class.
+On startup, each loaded plugin will get its `init()` function called, with two
+arguments - first is "analysis environment", which is an instance of
+`bsst.SymEnvironment` class, and second is string containing version of B'SST,
+the same as given by `bsst-cli --vestion`. This version string can be parsed
+with `packaging.version.Version()`, because it is a version of bsst python package
 
 If you create new opcodes with `bsst.OpCode`, please do it inside the plugin's
 `init()` function or inside hook functions, otherwise it won't work.

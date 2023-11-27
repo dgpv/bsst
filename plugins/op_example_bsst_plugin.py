@@ -31,7 +31,7 @@ def handle_opcode(
 
 
 # returns a 'state' for the plugin, which will be passed to the hooks
-def init(env: bsst.SymEnvironment) -> dict[str, Any]:
+def init(env: bsst.SymEnvironment, bsst_version: str) -> dict[str, Any]:
     env.set_hooks(pre_opcode=handle_opcode)
     ops.OP_EXAMPLE = bsst.OpCode(0xFF, 'EXAMPLE')
     return {}
