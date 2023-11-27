@@ -41,4 +41,4 @@ For details on how to use these hooks, please look into `test_hooks.py` in the '
 Plugins in this directory:
 
 * `op_example_bsst_plugin.py`: A simple example of how to add custom opcode
-* `raw_input_bsst_plugin.py`: Allows to supply hex or binary input to B'SST instead of text script source. Will use `python-bitcointx` and `python-elementstx` python packages to decode the input, therefore python packages must be available. Recognizes settings `--plugin-raw-input=hex` (the default) and `--plugin-raw-input=binary`
+* `raw_input_bsst_plugin.py`: Allows to supply hex or binary input to B'SST instead of text script source. Will use `python-bitcointx` and `python-elementstx` python packages to decode the input, therefore python packages must be available. Recognizes settings `--plugin-raw-input=hex` (the default) and `--plugin-raw-input=binary`. Will output the decoded script, each line will have a comment displaying the offset of the opcode/data in this line
