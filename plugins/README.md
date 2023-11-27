@@ -37,3 +37,8 @@ It takes handler functions as keyword arguments:
 * `post_finalize`: called just after execution context was finalized (result on the stack was checked, `OP_DEPTH` results was adjusted, etc.)
 
 For details on how to use these hooks, please look into `test_hooks.py` in the 'tests' directory of B'SST repository, and also into plugins in this directory
+
+Plugins in this directory:
+
+* `op_example_bsst_plugin.py`: A simple example of how to add custom opcode
+* `raw_input_bsst_plugin.py`: Allows to supply hex or binary input to B'SST instead of text script source. Will use `python-bitcointx` and `python-elementstx` python packages to decode the input, therefore python packages must be available. Recognizes settings `--plugin-raw-input=hex` (the default) and `--plugin-raw-input=binary`
