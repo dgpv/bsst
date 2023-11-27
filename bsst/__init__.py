@@ -1458,8 +1458,8 @@ class SymEnvironment:
             if not plugin_filename.endswith(PLUGIN_FILE_SUFFIX):
                 raise ValueError(f"plugin file name must end with '{PLUGIN_FILE_SUFFIX}'")
 
-            plugin_name = PLUGIN_NAME_PREFIX + plugin_filename[:-len(PLUGIN_FILE_SUFFIX)]
-            module_name = f'bsst.{plugin_name}'
+            plugin_name = plugin_filename[:-len(PLUGIN_FILE_SUFFIX)]
+            module_name = f'bsst.{PLUGIN_NAME_PREFIX}{plugin_name}'
 
             if module_name in sys.modules:
                 continue
