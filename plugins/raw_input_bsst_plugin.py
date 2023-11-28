@@ -64,7 +64,7 @@ def parse_input_file(env: 'bsst.SymEnvironment', state: dict[str, Any]
 
 
 def plugin_settings(env: 'bsst.SymEnvironment', settings_str: str,
-                    state: dict[str, Any]) -> 'bsst.ScriptInfo':
+                    state: dict[str, Any]) -> None:
     if settings_str not in ('hex', 'binary'):
         raise ValueError('unrecognized setting: use either "hex" or "binary"')
 
