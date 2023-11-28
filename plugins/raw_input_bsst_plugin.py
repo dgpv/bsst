@@ -1,10 +1,14 @@
 import sys
-import bsst
 import binascii
+from types import ModuleType
 from typing import Any
 
 from bitcointx import ChainParams
 from bitcointx.core.script import CScript
+
+if not Any:  # always false
+    # mock-import bsst - for mypy. we will set bsst global inside init()
+    import bsst
 
 OFFSET_AT = 40
 
@@ -72,7 +76,13 @@ def plugin_settings(env: 'bsst.SymEnvironment', settings_str: str,
 
 
 # returns a 'state' for the plugin, which will be passed to the hooks
-def init(env: bsst.SymEnvironment, bsst_version: str) -> dict[str, Any]:
+def init(bsst_module: ModuleType, env: 'bsst.SymEnvironment'
+         ) -> dict[str, Any]:
+
+    global bsst
+    bsst = bsst_module
+
     env.set_hooks(parse_input_file=parse_input_file,
                   plugin_settings=plugin_settings)
+
     return {}

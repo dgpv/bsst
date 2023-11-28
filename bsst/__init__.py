@@ -1483,7 +1483,7 @@ class SymEnvironment:
             spec.loader.exec_module(plugin_module)
             with PluginContext(plugin_name):
                 self._plugin_module_state[plugin_name] = \
-                    plugin_module.init(self, VERSION)
+                    plugin_module.init(sys.modules[__name__], self)
 
             self._plugin_modules.add(plugin_module)
 
@@ -4608,6 +4608,7 @@ class ExecContext(SupportsFailureCodeCallbacks):
         self._enforcement_condition_positions = {}
         self._data_refcounts = {}
         self._data_refcount_neighbors = {}
+        self._plugin_data: dict[str, dict[str, Any]] = {}
         self.unused_values = set()
         self.data_placeholders_with_assumptions_applied = set()
         self.data_references: dict[str, 'SymData'] = {}
@@ -4666,6 +4667,17 @@ class ExecContext(SupportsFailureCodeCallbacks):
             inst.enforcements.append(e.clone(context=inst))
 
         return inst
+
+    def get_plugin_data(self) -> dict[str, Any]:
+        assert g_current_plugin_name is not None, \
+            "expected to be called from within PluginContext()"
+
+        pname = g_current_plugin_name
+
+        if pname not in self._plugin_data:
+            self._plugin_data[pname] = {}
+
+        return self._plugin_data[pname]
 
     def branch(self: T_ExecContext, *,
                cond: Optional[Union['SymData', tuple['SymData', ...]]] = None,
