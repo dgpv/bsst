@@ -10003,7 +10003,7 @@ def parse_cmdline_args(args: Iterable[str]) -> None:  # noqa
             plugin_name = name[7:]
             is_ok, err_str = env.call_plugin_settings_hook(plugin_name, value_str)
             if is_ok:
-                return
+                continue
 
             sys.stderr.write(f'{err_str}\n')
             sys.exit(-1)

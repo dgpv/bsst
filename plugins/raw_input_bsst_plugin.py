@@ -13,6 +13,7 @@ def parse_input_file(env: 'bsst.SymEnvironment', state: dict[str, Any]
                      ) -> 'bsst.ScriptInfo':
 
     is_binary = state.get('format') == 'binary'
+    data: str | bytes
     if env.input_file == '-':
         if is_binary:
             data = sys.stdin.buffer.read()
@@ -23,9 +24,14 @@ def parse_input_file(env: 'bsst.SymEnvironment', state: dict[str, Any]
             data = f.read()
 
     if is_binary:
+        assert isinstance(data, bytes)
         bin_data = data
     else:
+        assert isinstance(data, str)
         bin_data = binascii.unhexlify(data.strip())
+
+    if len(bin_data) == 0:
+        return bsst.ScriptInfo()
 
     if env.is_elements:
         chain_mode = 'elements'
