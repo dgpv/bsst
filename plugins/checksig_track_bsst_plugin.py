@@ -13,6 +13,11 @@ def pre_finalize(env: 'bsst.SymEnvironment', ctx: 'bsst.ExecContext',
 
     checksig_results: list[Union[int, 'z3.ExprRef']] = []
 
+    if not env.z3_enabled:
+        ctx.add_warning('Checksig tracking is not performed because '
+                        'Z3 is not enabled')
+        return
+
     for pc, op, r in ctx.sig_check_operations:
         if op in (bsst.OP_CHECKSIGVERIFY, bsst.OP_CHECKMULTISIGVERIFY):
             checksig_results.append(1)
