@@ -220,5 +220,44 @@ echo '1 $a $b $c checksigadd $b 0 add equalverify' | ${BSST} --plugins=plugins/c
 
 grep 'warn_possible_success_without_sig_check' ${TESTOUT}
 
+cat >${TESTEXPECTED} <<END
+
+============
+Valid paths:
+============
+
+[Root]
+------
+
+==============================
+Enforced constraints per path:
+==============================
+
+All valid paths:
+----------------
+
+        GREATERTHANOREQUAL(CHECKSIGADD(\$c, CHECKSIGADD(\$a, 0, \$b), \$d), 1) @ END
+
+==============
+Unused values:
+==============
+
+	CHECKSIGADD(\$e, CHECKSIGADD(\$c, CHECKSIGADD(\$a, 0, \$b), \$d), \$f) from 13:L1
+
+==================================
+Witness usage for all valid paths:
+==================================
+Witnesses used: 0
+
+END
+
+echo '$a 0 $b checksigadd $c swap $d checksigadd dup toaltstack $e swap $f checksigadd drop fromaltstack 1 greaterthanorequal' | ${BSST} --plugins=plugins/checksig_track_bsst_plugin.py --z3-enabled=true --is-elements=true --use-parallel-solving=false --produce-model-values=false --log-progress=false > ${TESTOUT}
+
+diff -u ${TESTOUT} ${TESTEXPECTED}
+
+echo '$a 0 $b checksigadd $c swap $d checksigadd dup toaltstack $e swap $f checksigadd drop fromaltstack 0 greaterthanorequal' | ${BSST} --plugins=plugins/checksig_track_bsst_plugin.py --z3-enabled=true --is-elements=true --use-parallel-solving=false --produce-model-values=false --log-progress=false > ${TESTOUT}
+
+grep 'warn_possible_success_without_sig_check' ${TESTOUT}
+
 echo "PLUGINS TEST SUCCESS"
 

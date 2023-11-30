@@ -1293,10 +1293,9 @@ class SymEnvironment:
             Callable[['SymEnvironment', 'ExecContext', dict[str, Any]],
                      None]] = None,
     ) -> None:
-        assert g_current_plugin_name is not None, \
+        pname = cur_plugin_name()
+        assert pname is not None, \
             "expected to be called from within PluginContext()"
-
-        pname = g_current_plugin_name
 
         if pname not in self._plugin_module_state:
             self._plugin_module_state[pname] = {}
@@ -3290,6 +3289,10 @@ def ModeTagsForOpcodes(*tags: str) -> Generator[None, None, None]:
         g_mode_tags_for_opcodes = prev_tags
 
 
+def cur_plugin_name() -> str | None:
+    return g_current_plugin_name
+
+
 @contextmanager
 def PluginContext(name: str) -> Generator[None, None, None]:
     global g_current_plugin_name
@@ -4670,10 +4673,9 @@ class ExecContext(SupportsFailureCodeCallbacks):
         return inst
 
     def get_plugin_data(self) -> dict[str, Any]:
-        assert g_current_plugin_name is not None, \
+        pname = cur_plugin_name()
+        assert pname is not None, \
             "expected to be called from within PluginContext()"
-
-        pname = g_current_plugin_name
 
         if pname not in self._plugin_data:
             self._plugin_data[pname] = {}
@@ -9259,6 +9261,8 @@ def report() -> None:  # noqa
                     if w_str not in shown_warnings:
                         env.write_line(f'\t{w_str}')
                         shown_warnings.add(w_str)
+
+                    env.ensure_empty_line()
 
                 env.ensure_empty_line()
 
