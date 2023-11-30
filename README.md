@@ -409,7 +409,7 @@ without installing `bsst` python module.
         it will be shown with '=' between the name and the value in the report,
         otherwise the separator will be ':'.
 
-  --produce-model-values-for=`'wit*,tx,stack'`
+  --produce-model-values-for='wit*,tx,stack'
 
         A set of patterns to specify which model values to produce,
         if `--produce-model-values` is true.
