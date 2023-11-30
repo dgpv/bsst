@@ -4612,6 +4612,7 @@ class ExecContext(SupportsFailureCodeCallbacks):
         self.unused_values = set()
         self.data_placeholders_with_assumptions_applied = set()
         self.data_references: dict[str, 'SymData'] = {}
+        self.sig_check_operations: list[tuple[int, 'OpCode', 'SymData']] = []
 
     @property
     def stack(self) -> list['SymData']:
@@ -7036,6 +7037,8 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
             z3check()
 
+            ctx.sig_check_operations.append((ctx.pc, op, r))
+
             popstack()
             popstack()
 
@@ -7067,6 +7070,10 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
             Check(checksig_result == If(vchSig.Length() == 0, 0, 1))
             Check(r.as_Int() == bn.as_Int() + checksig_result)
+
+            z3check()
+
+            ctx.sig_check_operations.append((ctx.pc, op, r))
 
             popstack()
             popstack()
@@ -7182,6 +7189,8 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
             z3check()
 
+            ctx.sig_check_operations.append((ctx.pc, op, r))
+
             popstack()
             for _ in pubkeys:
                 popstack()
@@ -7280,6 +7289,8 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                       enforcement_condition=r)
 
             z3check()
+
+            ctx.sig_check_operations.append((ctx.pc, op, r))
 
             popstack()
             popstack()
