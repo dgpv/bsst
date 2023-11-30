@@ -2,9 +2,11 @@
 
 Version 0.1.2.dev0:
 
-* Rework plugin system, now plugins are 'general' in a sense that they can hook into different stages of analysis to observe or change various things
+* Rework plugin system, now plugins are 'general' in a sense that they can hook into different stages of analysis to observe or change various things. Please look at `plugins` directory for details
 
 * Add ability to set assertions on stack values and witnesses, and assumptions for data placeholders. Please see newly added "Assertions" and "Assumptions" sections in README. You might also look at `tests/test_assertions_and_assumptions.py` for examples of usage
+
+* New setting: `--produce-model-values-for`. It is a set of glob patterns to specify which model values to produce. Please look at the help text for this setting for details. Data references now are not included in the default set to produce model values for, but can be enabled with `$*` pattern.
 
 * Settings that accept a comma-separated set of values, when the setting argument is given twice, now update the set rather than replace it
 

@@ -409,6 +409,29 @@ without installing `bsst` python module.
         it will be shown with '=' between the name and the value in the report,
         otherwise the separator will be ':'.
 
+  --produce-model-values-for=`'wit*,tx,stack'`
+
+        A set of patterns to specify which model values to produce,
+        if `--produce-model-values` is true.
+
+        Possible patterns are: 'tx' - to match all transaction fields,
+        'stack' for values on the stack (and script result), or a glob pattern.
+        Values on the stack are not matched against glob patterns.
+
+        Characters allowed in the pattern: alphanumeric, and '_?*$&()[]!'.
+        The names that will be matched against this pattern are:
+        data placeholders, data references, transaction field values
+        (for example, 'tx_num_inputs', 'OUTPUT_2_VALUE', etc.).
+        When matching transaction input/output fields, note that their
+        representation can be like `OUTPUT_VALUE($n)`
+
+        The '*' pattern will obviously match anything. Empty set means
+        no model values will be produced.
+
+        Note that if the value itself was never accessed by the script,
+        the model value for it will not be produced, even if the
+        pattern is given that would match it.
+
   --check-always-true-enforcements=true
 
         Use Z3 to check enforcements for being 'always true': that is,

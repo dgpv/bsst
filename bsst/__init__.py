@@ -105,6 +105,7 @@ import types
 import struct
 import signal
 import random
+import fnmatch
 import hashlib
 import inspect
 import importlib
@@ -314,11 +315,59 @@ class SymEnvironment:
             if not self._z3_enabled:
                 return False
 
+            if not self._produce_model_values_for:
+                return False
+
         return self._produce_model_values
 
     @produce_model_values.setter
     def produce_model_values(self, value: bool) -> None:
         self._produce_model_values = value
+
+    @property
+    def produce_model_values_for(self) -> set[str]:
+        """A set of patterns to specify which model values to produce,
+        if `produce_model_values` is true.
+
+        Possible patterns are: 'tx' - to match all transaction fields,
+        'stack' for values on the stack (and script result), or a glob pattern.
+        Values on the stack are not matched against glob patterns.
+
+        Characters allowed in the pattern: alphanumeric, and '_?*$&()[]!'.
+        The names that will be matched against this pattern are:
+        data placeholders, data references, transaction field values
+        (for example, 'tx_num_inputs', 'OUTPUT_2_VALUE', etc.).
+        When matching transaction input/output fields, note that their
+        representation can be like `OUTPUT_VALUE($n)`
+
+        The '*' pattern will obviously match anything. Empty set means
+        no model values will be produced.
+
+        Note that if the value itself was never accessed by the script,
+        the model value for it will not be produced, even if the
+        pattern is given that would match it.
+        """
+
+        if not self._is_for_usage_message:
+            if not self._z3_enabled:
+                return set()
+
+        return self._produce_model_values_for
+
+    @produce_model_values_for.setter
+    def produce_model_values_for(self, values: Iterable[str]) -> None:
+        result_set: set[str] = set()
+
+        for v in values:
+            for c in v:
+                if not c.isalnum() and c not in '_?*$&()[]!':
+                    raise ValueError(
+                        'unexpected character in pattern to '
+                        'specify model values to produce')
+
+            result_set.add(v)
+
+        self._produce_model_values_for = result_set
 
     @property
     def check_always_true_enforcements(self) -> bool:
@@ -1043,6 +1092,7 @@ class SymEnvironment:
         self._log_solving_attempts = True
         self._log_solving_attempts_to_stderr = False
         self._produce_model_values = True
+        self._produce_model_values_for = {'stack', 'tx', 'wit*'}
         self._check_always_true_enforcements = True
         self._exit_on_solver_result_unknown = True
         self._tag_data_with_position = False
@@ -1247,6 +1297,16 @@ class SymEnvironment:
             self.write_out(msg, sys.stderr)
         elif self.log_solving_attempts:
             self.write_out(msg, sys.stdout)
+
+    def model_values_name_match(self, name: str) -> bool:
+        for pattern in self._produce_model_values_for:
+            if pattern in ('tx', 'stack'):
+                continue
+
+            if fnmatch.fnmatch(name, pattern):
+                return True
+
+        return False
 
     def get_root_branch(self) -> 'Branchpoint':
         if self._root_branch is None:
@@ -2449,6 +2509,14 @@ def z3_pop_context() -> None:
             env.get_solver().pop()
 
 
+@contextmanager
+def IsolatedSolverContext() -> Generator[None, None, None]:
+    z3_push_context()
+    try:
+        yield
+    finally:
+        z3_pop_context()
+
 def z3check(  # noqa
     *, force_check: bool = False,
     model_values_to_retrieve: dict[str, tuple[str, SymDataRType]] | None = None
@@ -2695,25 +2763,22 @@ def collect_model_values(
                  Optional['z3.BoolRef']],
     *, preferred_rtype: Optional[SymDataRType] = None
 ) -> None:
-    z3_push_context()
+    with IsolatedSolverContext():
+        mvdict_req: dict[str, tuple[str, SymDataRType]] = {}
+        mvnamemap: dict[str, 'SymData'] = {}
 
-    mvdict_req: dict[str, tuple[str, SymDataRType]] = {}
-    mvnamemap: dict[str, 'SymData'] = {}
+        for v in values:
+            v.update_model_values_request_dict(mvdict_req, mvnamemap,
+                                               preferred_rtype=preferred_rtype)
 
-    for v in values:
-        v.update_model_values_request_dict(mvdict_req, mvnamemap,
-                                           preferred_rtype=preferred_rtype)
+        mvdict: Optional[dict[str, 'ConstrainedValue']] = None
 
-    mvdict: Optional[dict[str, 'ConstrainedValue']] = None
-
-    while cb(mvdict):
-        try:
-            mvdict = z3check(force_check=True,
-                             model_values_to_retrieve=mvdict_req)
-        except ScriptFailure:
-            break
-
-    z3_pop_context()
+        while cb(mvdict):
+            try:
+                mvdict = z3check(force_check=True,
+                                 model_values_to_retrieve=mvdict_req)
+            except ScriptFailure:
+                break
 
 
 def is_cond_possible(  # noqa
@@ -2723,46 +2788,42 @@ def is_cond_possible(  # noqa
 
     env = cur_env()
 
-    z3_push_context()
+    with IsolatedSolverContext():
+        if env.log_progress:
+            env.write(f'checking {name or sd} ')
+            if env.log_solving_attempts_to_stderr:
+                env.solving_log(f'  checking {name or sd} ')
 
-    if env.log_progress:
-        env.write(f'checking {name or sd} ')
-        if env.log_solving_attempts_to_stderr:
-            env.solving_log(f'  checking {name or sd} ')
+        sd_failcode = sd.get_failcode_dispatcher('possible')
 
-    sd_failcode = sd.get_failcode_dispatcher('possible')
+        try:
+            Check(cond, sd_failcode())
+        except ScriptFailure:
+            if env.log_progress and fail_msg:
+                env.ensure_newline()
+                env.write_line(f'{fail_msg}, because condition is static')
 
-    try:
-        Check(cond, sd_failcode())
-    except ScriptFailure:
-        if env.log_progress and fail_msg:
-            env.ensure_newline()
-            env.write_line(f'{fail_msg}, because condition is static')
+            return False
 
-        z3_pop_context()
-        return False
+        failcodes: list[tuple[int, str]] = []
+        try:
+            z3check(force_check=True)
+            check_ok = True
+        except ScriptFailure:
+            check_ok = False
+        except ScriptFailureSolver as sf:
+            ignored_code = ''
+            for code, pc in parse_failcodes(str(sf)):
+                if code.startswith('check_possible'):
+                    assert not ignored_code
+                    ignored_code = code
+                else:
+                    failcodes.append((pc, code))
 
-    failcodes: list[tuple[int, str]] = []
-    try:
-        z3check(force_check=True)
-        check_ok = True
-    except ScriptFailure:
-        check_ok = False
-    except ScriptFailureSolver as sf:
-        ignored_code = ''
-        for code, pc in parse_failcodes(str(sf)):
-            if code.startswith('check_possible'):
-                assert not ignored_code
-                ignored_code = code
-            else:
-                failcodes.append((pc, code))
+            if ignored_code:
+                assert ignored_code == f'check_{sd_failcode.name_prefix}'
 
-        if ignored_code:
-            assert ignored_code == f'check_{sd_failcode.name_prefix}'
-
-        check_ok = False
-
-    z3_pop_context()
+            check_ok = False
 
     if env.log_progress:
         maybe_report_elapsed_time()
@@ -4616,6 +4677,7 @@ class ExecContext(SupportsFailureCodeCallbacks):
         self.data_placeholders_with_assumptions_applied = set()
         self.data_references: dict[str, 'SymData'] = {}
         self.sig_check_operations: list[tuple[int, 'OpCode', 'SymData']] = []
+        self.matched_model_values: list['SymData'] = []
 
     @property
     def stack(self) -> list['SymData']:
@@ -8261,55 +8323,53 @@ def _symex_script() -> None:  # noqa
                 f'Analyzing from position {op_pos_info(max(0, ctx.pc-1))}')
             env.solving_log_ensure_empty_line()
 
-        z3_push_context()
-
-        env.stack_symdata_index = 0
-
-        ctx.on_start()
-
-        while ctx.pc < len(env.script_info.body) and not ctx.failure:
-
-            pre_op_state = ctx.exec_state.clone()
-            op_or_sd = env.script_info.body[ctx.pc]
-
-            if env.sigversion in (SigVersion.BASE, SigVersion.WITNESS_V0) and \
-                    isinstance(op_or_sd, OpCode) and \
-                    op_or_sd.code > OP_16.code:
-
-                ctx.segwit_mode_op_count += 1
-                if ctx.segwit_mode_op_count > MAX_OPS_PER_SCRIPT_SEGWIT_MODE:
-                    ctx.register_failure(
-                        ctx.pc, 'Maximum opcode count is reached')
-                    break
-
-            num_pre_op_used_witnesses = len(ctx.used_witnesses)
-
-            if symex_op(ctx, op_or_sd):
-                if data_reference := env.script_info.data_reference_at(ctx.pc):
-                    if len(ctx.stack) > 0:
-                        ctx.stack[-1].set_data_reference(data_reference)
-
-                num_new_witnesses = len(ctx.used_witnesses) - num_pre_op_used_witnesses
-                assert num_new_witnesses >= 0
-                if num_new_witnesses:
-                    for wit in ctx.used_witnesses[-num_new_witnesses:]:
-                        pre_op_state.stack.insert(0, wit)
-
-                ctx.exec_state_log[ctx.pc] = pre_op_state
-
-            if not ctx.failure:
-                ctx.pc += 1
+        with IsolatedSolverContext():
 
             env.stack_symdata_index = 0
 
-        if not ctx.failure:
-            ctx.exec_state_log[ctx.pc] = ctx.exec_state.clone()
-            with CurrentOp(None):
-                finalize(ctx)
+            ctx.on_start()
 
-        env.stack_symdata_index = None
+            while ctx.pc < len(env.script_info.body) and not ctx.failure:
 
-        z3_pop_context()
+                pre_op_state = ctx.exec_state.clone()
+                op_or_sd = env.script_info.body[ctx.pc]
+
+                if env.sigversion in (SigVersion.BASE, SigVersion.WITNESS_V0) and \
+                        isinstance(op_or_sd, OpCode) and \
+                        op_or_sd.code > OP_16.code:
+
+                    ctx.segwit_mode_op_count += 1
+                    if ctx.segwit_mode_op_count > MAX_OPS_PER_SCRIPT_SEGWIT_MODE:
+                        ctx.register_failure(
+                            ctx.pc, 'Maximum opcode count is reached')
+                        break
+
+                num_pre_op_used_witnesses = len(ctx.used_witnesses)
+
+                if symex_op(ctx, op_or_sd):
+                    if data_reference := env.script_info.data_reference_at(ctx.pc):
+                        if len(ctx.stack) > 0:
+                            ctx.stack[-1].set_data_reference(data_reference)
+
+                    num_new_witnesses = len(ctx.used_witnesses) - num_pre_op_used_witnesses
+                    assert num_new_witnesses >= 0
+                    if num_new_witnesses:
+                        for wit in ctx.used_witnesses[-num_new_witnesses:]:
+                            pre_op_state.stack.insert(0, wit)
+
+                    ctx.exec_state_log[ctx.pc] = pre_op_state
+
+                if not ctx.failure:
+                    ctx.pc += 1
+
+                env.stack_symdata_index = 0
+
+            if not ctx.failure:
+                ctx.exec_state_log[ctx.pc] = ctx.exec_state.clone()
+                with CurrentOp(None):
+                    finalize(ctx)
+
+            env.stack_symdata_index = None
 
     env.get_root_branch().walk_contexts(symex_context, is_executing=True)
 
@@ -8811,28 +8871,43 @@ def _finalize(ctx: ExecContext, env: SymEnvironment) -> None:  # noqa
 
     mvdict_req: dict[str, tuple[str, SymDataRType]] = {}
     mvnamemap: dict[str, 'SymData'] = {}
+    processed_mv: list[SymData] = []
     if env.produce_model_values:
         for wit in ctx.used_witnesses:
-            wit.update_model_values_request_dict(mvdict_req, mvnamemap)
-
-        processed = ctx.used_witnesses.copy()
+            assert wit.name
+            if env.model_values_name_match(wit.name):
+                wit.update_model_values_request_dict(mvdict_req, mvnamemap)
+                processed_mv.append(wit)
 
         for txval in ctx.tx.values():
-            assert txval not in processed, \
+            assert txval not in processed_mv, \
                 ("only witnesses are processed at this point, tx values"
                     "cannot intersect")
-            txval.update_model_values_request_dict(mvdict_req, mvnamemap)
-            processed.append(txval)
+            if 'tx' in env.produce_model_values_for or \
+                    env.model_values_name_match(f'{txval}'):
+                txval.update_model_values_request_dict(mvdict_req, mvnamemap)
+                processed_mv.append(txval)
 
         for val in env.data_placeholders.values():
-            if val not in processed:
-                val.update_model_values_request_dict(mvdict_req, mvnamemap)
-                processed.append(val)
+            if val not in processed_mv:
+                assert val.name
+                if env.model_values_name_match(val.name):
+                    val.update_model_values_request_dict(mvdict_req, mvnamemap)
+                    processed_mv.append(val)
 
-        for val in ctx.stack:
-            if val not in processed:
-                val.update_model_values_request_dict(mvdict_req, mvnamemap)
-                processed.append(val)
+        for dref_name, dref in ctx.data_references.items():
+            if dref not in processed_mv:
+                if env.model_values_name_match(f'&{dref_name}'):
+                    dref.update_model_values_request_dict(mvdict_req, mvnamemap)
+                    processed_mv.append(dref)
+
+        ctx.matched_model_values = processed_mv.copy()
+
+        if 'stack' in env.produce_model_values_for:
+            for val in ctx.stack:
+                if val not in processed_mv:
+                    val.update_model_values_request_dict(mvdict_req, mvnamemap)
+                    processed_mv.append(val)
 
     if env.log_progress:
         print_as_header("Finalizing path", is_solving=True)
@@ -8900,76 +8975,33 @@ def _finalize(ctx: ExecContext, env: SymEnvironment) -> None:  # noqa
             if is_verify_target:
                 verify_targets.append(e)
 
-    txvalues = ctx.tx.values()
-    got_model_values = (env.produce_model_values and
-                        (ctx.used_witnesses or txvalues or ctx.stack
-                         or env.data_placeholders))
-
     if env.produce_model_values:
+        with IsolatedSolverContext():
+            if env.log_progress and mvdict_req:
+                print_as_header('Checking for non-variable model values',
+                                level=2, is_solving=True)
 
-        z3_push_context()
-
-        if env.log_progress and got_model_values:
-            print_as_header('Checking for non-variable model values',
-                            level=2, is_solving=True)
-
-        for wit in ctx.used_witnesses:
-            wit.check_only_one_value_possible()
-
-        processed = ctx.used_witnesses.copy()
-
-        for txval in txvalues:
-            assert txval not in processed, \
-                ("only witnesses are processed at this point, tx values"
-                    "cannot intersect")
-            txval.check_only_one_value_possible()
-            processed.append(txval)
-
-        for val in env.data_placeholders.values():
-            if val in processed:
-                if env.log_progress:
-                    env.write_line(f'skip checking {val}: already checked')
-            else:
+            for val in set(mvnamemap.values()):
                 val.check_only_one_value_possible()
-                processed.append(val)
-
-        for i, val in enumerate(reversed(ctx.stack)):
-            pos = -(i+1)
-            if top and pos == -1:
-                valname = '<result>'
-            else:
-                valname = f'stack[{pos}]'
-
-            if val in processed:
-                if env.log_progress:
-                    env.write_line(f'skip checking {valname}: already checked')
-            else:
-                val.check_only_one_value_possible(name=valname)
-                processed.append(val)
-
-        z3_pop_context()
 
     if env.check_always_true_enforcements and verify_targets:
         if env.log_progress:
             print_as_header('Checking for always-true enforcements',
                             level=2, is_solving=True)
 
-        z3_push_context()
+        with IsolatedSolverContext():
+            for e in verify_targets:
+                global g_skip_assertion_for_enforcement_condition
+                g_skip_assertion_for_enforcement_condition = (e.cond, e.pc)
 
-        for e in verify_targets:
-            global g_skip_assertion_for_enforcement_condition
-            g_skip_assertion_for_enforcement_condition = (e.cond, e.pc)
-
-            try:
-                ename = f'{e.cond} @ {op_pos_info(e.pc)}'
-                if not is_cond_possible(use_as_script_bool(e.cond) == 0,
-                                        e.cond, name=ename,
-                                        fail_msg='  - always true'):
-                    e.is_always_true_in_path = True
-            finally:
-                g_skip_assertion_for_enforcement_condition = None
-
-        z3_pop_context()
+                try:
+                    ename = f'{e.cond} @ {op_pos_info(e.pc)}'
+                    if not is_cond_possible(use_as_script_bool(e.cond) == 0,
+                                            e.cond, name=ename,
+                                            fail_msg='  - always true'):
+                        e.is_always_true_in_path = True
+                finally:
+                    g_skip_assertion_for_enforcement_condition = None
 
 
 def data_reference_names_show() -> None:
@@ -9105,39 +9137,47 @@ def report() -> None:  # noqa
                 def get_val_str(v: SymData) -> str:
                     return model_value_line(v)
 
-                txvalues = bp.context.tx.values()
-                for txval in txvalues:
-                    mvals_list.append(f'{txval} {get_val_str(txval)}')
-
-                for vname, val in env.data_placeholders.items():
-                    mvals_list.append(f'{vname} {get_val_str(val)}')
-
-                for w in bp.context.used_witnesses:
-                    mvals_list.append(f'{w} {get_val_str(w)}')
+                for val in bp.context.matched_model_values:
+                    for dref_name, dref in bp.context.data_references.items():
+                        if dref == val:
+                            mvals_list.append(
+                                f'&{dref_name} = {val} {get_val_str(val)}')
+                            break
+                    else:
+                        mvals_list.append(f'{val} {get_val_str(val)}')
             else:
                 def get_val_str(v: SymData) -> str:
                     return ': ?'
 
-            stack_len = len(bp.context.stack)
-            if not env.cleanstack_flag and stack_len > 0:
-                for i, val in enumerate(reversed(bp.context.stack)):
-                    pos = -(i+1)
-                    vname = '' if not val._name else f'= {val} '
-                    mvals_list.append(f'stack[{pos}] {vname}'
-                                      f'{get_val_str(val)}')
-            elif stack_len:
-                assert stack_len == 1, \
-                    "context should have failure set otherwise"
-                top = bp.context.stack[-1]
-                if mvals_list:
-                    mvals_list.append('')
+            if 'stack' in env.produce_model_values_for:
+                def maybe_add_deref(val: SymData, vname: str) -> str:
+                    assert bp.context
+                    for dref_name, dref in bp.context.data_references.items():
+                        if dref == val:
+                            return f'= &{dref_name} {vname}'
 
-                vname = '' if not top._name else f'= {top} '
-                mvals_list.append(f'<result> {vname}{get_val_str(top)}')
-            else:
-                assert stack_len == 0
-                assert env.is_incomplete_script, \
-                    "context should have failure set otherwise"
+                    return vname
+
+                stack_len = len(bp.context.stack)
+                if not env.cleanstack_flag and stack_len > 0:
+                    for i, val in enumerate(reversed(bp.context.stack)):
+                        pos = -(i+1)
+                        vname = '' if not val._name else f'= {val} '
+                        mvals_list.append(f'stack[{pos}] {maybe_add_deref(val, vname)}'
+                                          f'{get_val_str(val)}')
+                elif stack_len:
+                    assert stack_len == 1, \
+                        "context should have failure set otherwise"
+                    top = bp.context.stack[-1]
+                    if mvals_list:
+                        mvals_list.append('')
+
+                    vname = '' if not top._name else f'= {top} '
+                    mvals_list.append(f'<result> {maybe_add_deref(top, vname)}{get_val_str(top)}')
+                else:
+                    assert stack_len == 0
+                    assert env.is_incomplete_script, \
+                        "context should have failure set otherwise"
 
             mvmap_key = (len(bp.context.used_witnesses), tuple(mvals_list))
 
@@ -9238,6 +9278,7 @@ def report() -> None:  # noqa
                     env.write_line('Stack values:')
                 else:
                     env.write_line('Model values:')
+
                 for ws in mvals:
                     env.write_line(f'\t{ws}')
 
