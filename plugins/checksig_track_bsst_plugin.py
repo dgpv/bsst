@@ -24,7 +24,7 @@ def pre_finalize(env: 'bsst.SymEnvironment', ctx: 'bsst.ExecContext',
                     bsst.OP_CHECKSIGFROMSTACKVERIFY):
             pass
         else:
-            env.add_warning(
+            ctx.add_warning(
                 f'opcode {op} at {bsst.op_pos_info(pc)} performs signature '
                 f'check, but is not supported by {bsst.cur_plugin_name()}'
                 f'plugin')
