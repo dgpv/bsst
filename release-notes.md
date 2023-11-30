@@ -14,7 +14,7 @@ Version 0.1.2.dev0:
 
 * Fix: scriptnum decoding was not imposing "0 >= x => 255" bound on the byte sequence if its size was 1. This was causing problems with `bsst-assume` tests, but likely that this could have caused problems elsewhere, too
 
-* To avoid confusion, data reference names cannot be "wit<N>" (where <N> is a number), because such names are reserved for witnesses
+* To avoid confusion, data reference names cannot be `wit<N>` (where `<N>` is a number), because such names are reserved for witnesses
 
 * Fixes in parser: quotes within quotes were allowed, but should not; angle brackets were sometimes not ignored
 
