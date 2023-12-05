@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 set -ex
 
@@ -32,7 +32,7 @@ Witness usage and model values for all valid paths:
 Witnesses used: 0
 
 Model values:
-	<result> = EXAMPLE(10) = 52
+        <result> = EXAMPLE(10) = 52
 
 END
 
@@ -95,13 +95,16 @@ Witness usage for all valid paths:
 ==================================
 Witnesses used: 1
 
+Stack values:
+        <result> = EQUAL(0, SUB(wit0, CHECKSIG(\$a, \$b))) : ?
+
 ==================
 Warnings per path:
 ==================
 
 IF wit0 @ 1:L1 : False
 ----------------------
-	warn_possible_success_without_sig_check @ END
+        warn_possible_success_without_sig_check @ END
 
 END
 
@@ -132,6 +135,9 @@ All valid paths:
 Witness usage for all valid paths:
 ==================================
 Witnesses used: 0
+
+Stack values:
+        <result> = 1
 
 END
 
@@ -172,6 +178,9 @@ Witness usage for all valid paths:
 ==================================
 Witnesses used: 0
 
+Stack values:
+        <result> = 1
+
 END
 
 echo '1 0 $a 1 $b $c 2 checkmultisig verify' | ${BSST} --plugins=plugins/checksig_track_bsst_plugin.py --z3-enabled=true --is-elements=true --use-parallel-solving=false --produce-model-values=false  --sigversion=witness_v0 --log-progress=false > ${TESTOUT}
@@ -210,6 +219,9 @@ Witness usage for all valid paths:
 ==================================
 Witnesses used: 0
 
+Stack values:
+        <result> = 1
+
 END
 
 echo '1 $a $b $c checksigadd $b 1 add equalverify' | ${BSST} --plugins=plugins/checksig_track_bsst_plugin.py --z3-enabled=true --is-elements=true --use-parallel-solving=false --produce-model-values=false --log-progress=false > ${TESTOUT}
@@ -242,12 +254,15 @@ All valid paths:
 Unused values:
 ==============
 
-	CHECKSIGADD(\$e, CHECKSIGADD(\$c, CHECKSIGADD(\$a, 0, \$b), \$d), \$f) from 13:L1
+        CHECKSIGADD(\$e, CHECKSIGADD(\$c, CHECKSIGADD(\$a, 0, \$b), \$d), \$f) from 13:L1
 
 ==================================
 Witness usage for all valid paths:
 ==================================
 Witnesses used: 0
+
+Stack values:
+        <result> = GREATERTHANOREQUAL(CHECKSIGADD(\$c, CHECKSIGADD(\$a, 0, \$b), \$d), 1) : ?
 
 END
 

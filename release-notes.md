@@ -8,6 +8,10 @@ Version 0.1.2.dev0:
 
 * New setting: `--produce-model-values-for`. It is a set of glob patterns to specify which model values to produce. Please look at the help text for this setting for details. Data references now are not included in the default set to produce model values for, but can be enabled with `$*` pattern.
 
+* More than one model value sample can be generated analyzed value, if max number of samples is specified after `:` in the pattern in `--produce-model-values-for`
+
+* Byte sizes of model value samples will be shown in the report when `--report-model-value-sizes` is set to `true`
+
 * Settings that accept a comma-separated set of values, when the setting argument is given twice, now update the set rather than replace it
 
 * Add settings to set comment marker. Note that comments are removed before parsing the rest of the line, and because of this, comment markers cannot appear within quoted strings

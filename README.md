@@ -222,9 +222,12 @@ The reports show:
 * Model values: possible values for various variables such as witnesses, script result, or transaction fields
   (in Elements mode, where there are transaction introspection opcodes)
 
-    - If there could be more values, the name and the value will be separated with `:`
+    - If there could be more than one value, the name and the value will be separated with `:`
     - If it is found that only one value is possible, the name and the value will be separated with `=`
     - If the value is totally unknown, it will be `?`
+    - If pattern in `--produce-model-values-for` specifies more than one sample to generate per analyzed value, the successive values will be printed on separate lines. This list of values will be terminated with `: ...` if there are more values possible, and with `: ---` if it is determined that only the listed values are possible
+    - Model value samples are generated in a way to have distinct byte sizes if possible
+    - If `--report-model-value-sizes` is set to `true`, then below each model value in the report will be the line with `SIZE:` or `SIZES:` followed by possible byte sizes for this model value. When not all possible sizes are shown, the list of sizes will end with `...`, like this: `SIZES: 1, 2, ...`
 
 * Warnings: possible issues dected while symbolically executing the script, that do not lead to script failure,
   but it is probably better to examine them and understand if they are problematic or not
@@ -409,7 +412,7 @@ without installing `bsst` python module.
         it will be shown with '=' between the name and the value in the report,
         otherwise the separator will be ':'.
 
-  --produce-model-values-for='wit*,tx,stack'
+  --produce-model-values-for='stack,tx,wit*'
 
         A set of patterns to specify which model values to produce,
         if `--produce-model-values` is true.
@@ -428,9 +431,17 @@ without installing `bsst` python module.
         The '*' pattern will obviously match anything. Empty set means
         no model values will be produced.
 
+        Pattern can be suffexed with ':' followed by the number of samples to
+        produce. For example, 'wit*:3' will produce 3 samples for each witness.
+        By default, 1 sample for each analyzed value will be produced.
+
         Note that if the value itself was never accessed by the script,
         the model value for it will not be produced, even if the
         pattern is given that would match it.
+
+  --report-model-value-sizes=false
+
+        Add information about byte size of produced model values in the report
 
   --check-always-true-enforcements=true
 

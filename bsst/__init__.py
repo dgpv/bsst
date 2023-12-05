@@ -138,6 +138,8 @@ LOCAL_ALWAYS_TRUE_SIGN = '{*}'
 PLUGIN_FILE_SUFFIX = '_bsst_plugin.py'
 PLUGIN_NAME_PREFIX = 'plugin_'
 
+INDENT = " "*8
+
 
 class BSSTError(Exception):
     ...
@@ -315,9 +317,6 @@ class SymEnvironment:
             if not self._z3_enabled:
                 return False
 
-            if not self._produce_model_values_for:
-                return False
-
         return self._produce_model_values
 
     @produce_model_values.setter
@@ -343,6 +342,10 @@ class SymEnvironment:
         The '*' pattern will obviously match anything. Empty set means
         no model values will be produced.
 
+        Pattern can be suffexed with ':' followed by the number of samples to
+        produce. For example, 'wit*:3' will produce 3 samples for each witness.
+        By default, 1 sample for each model value will be produced.
+
         Note that if the value itself was never accessed by the script,
         the model value for it will not be produced, even if the
         pattern is given that would match it.
@@ -352,18 +355,50 @@ class SymEnvironment:
             if not self._z3_enabled:
                 return []
 
-        return self._produce_model_values_for.copy()
+        return [f'{p}:{n}' if n > 1 else f'{p}' for p, n in
+                self.get_dict_produce_model_values_for().items()]
 
     @produce_model_values_for.setter
     def produce_model_values_for(self, values: Iterable[str]) -> None:
+        result_dict: dict[str, int] = {}
+
         for v in values:
-            for c in v:
+            num_samples = 1
+            for i, c in enumerate(v):
+                if c == ':':
+                    num_samples_str = v[i+1:]
+                    if not num_samples_str.isdigit():
+                        raise ValueError(
+                            'only digits are allowed after ":" in the pattern '
+                            'to specify model values to produce')
+
+                    num_samples = int(num_samples_str)
+                    if num_samples == 0:
+                        raise ValueError(
+                            'number of samples must be above zero in the pattern '
+                            'to specify model values to produce')
+
+                    v = v[:i]
+                    break
+
                 if not c.isalnum() and c not in '_?*$&()[]!':
                     raise ValueError(
-                        'unexpected character in pattern to '
-                        'specify model values to produce')
+                        'unexpected character in the pattern '
+                        'to specify model values to produce')
 
-        self._produce_model_values_for.extend(list(values))
+            result_dict[v] = num_samples
+
+        self._produce_model_values_for.update(result_dict)
+
+    @property
+    def report_model_value_sizes(self) -> bool:
+        """Add information about byte size of produced model values in the report
+        """
+        return self._report_model_value_sizes
+
+    @report_model_value_sizes.setter
+    def report_model_value_sizes(self, value: bool) -> None:
+        self._report_model_value_sizes = value
 
     @property
     def check_always_true_enforcements(self) -> bool:
@@ -1063,8 +1098,8 @@ class SymEnvironment:
         self._z3_enabled = False
         self._z3_debug = False
         self._comment_marker = '//'
-        self._points_of_interest: list[int | str] = []
-        self._explicitly_enabled_opcodes: list[str] = []
+        self._points_of_interest: list[int | str] = []  # expected empty (extended when set)
+        self._explicitly_enabled_opcodes: list[str] = []  # expected empty (extended when set)
         self._use_z3_incremental_mode = False
         self._use_parallel_solving = True
         self._parallel_solving_num_processes = 0
@@ -1088,7 +1123,8 @@ class SymEnvironment:
         self._log_solving_attempts = True
         self._log_solving_attempts_to_stderr = False
         self._produce_model_values = True
-        self._produce_model_values_for: list[str] = ['stack', 'tx', 'wit*']
+        self._produce_model_values_for: dict[str, int] = {}  # expected empty (updated when set)
+        self._report_model_value_sizes = False
         self._check_always_true_enforcements = True
         self._exit_on_solver_result_unknown = True
         self._tag_data_with_position = False
@@ -1108,7 +1144,7 @@ class SymEnvironment:
         self._max_tx_size = 1000000
         self._max_num_inputs = 24386
         self._max_num_outputs = self._max_tx_size // (9+1+33+33)
-        self._plugins: list[str] = []
+        self._plugins: list[str] = []  # expected empty (extended when set)
 
         self._sym_ec_mul_scalar_fun: Optional['z3.Function'] = None
         self._sym_ec_tweak_add_fun: Optional['z3.Function'] = None
@@ -1132,7 +1168,7 @@ class SymEnvironment:
         self.dummyexpr_counter = 0
         self.stack_symdata_index: int | None = None
         self.data_placeholders: dict[str, 'SymData'] = {}
-        self.check_op_start_time = 0.0
+        self.elapsed_time_track_start_time = 0.0
 
         self._root_branch: Optional['Branchpoint'] = None
         self._solver: Optional['z3.Solver'] = None
@@ -1294,15 +1330,15 @@ class SymEnvironment:
         elif self.log_solving_attempts:
             self.write_out(msg, sys.stdout)
 
-    def model_values_name_match(self, name: str) -> bool:
-        for pattern in self._produce_model_values_for:
-            if pattern in ('tx', 'stack'):
-                continue
+    def get_dict_produce_model_values_for(self) -> dict[str, int]:
+        return self._produce_model_values_for or {'stack': 1, 'tx': 1, 'wit*': 1}
 
+    def model_values_name_match(self, name: str) -> int:
+        for pattern, num_samples in self.get_dict_produce_model_values_for().items():
             if fnmatch.fnmatch(name, pattern):
-                return True
+                return num_samples
 
-        return False
+        return 0
 
     def get_root_branch(self) -> 'Branchpoint':
         if self._root_branch is None:
@@ -2784,6 +2820,10 @@ def is_cond_possible(  # noqa
 
     env = cur_env()
 
+    assert env.z3_enabled
+
+    env.elapsed_time_track_start_time = time.monotonic()
+
     with IsolatedSolverContext():
         if env.log_progress:
             env.write(f'checking {name or sd} ')
@@ -2831,7 +2871,7 @@ def is_cond_possible(  # noqa
 
                 for pc, code in failcodes:
                     if not code.startswith('check_possible'):
-                        env.write_line(f"\t{code} @ {op_pos_info(pc)}")
+                        env.write_line(f"{INDENT}{code} @ {op_pos_info(pc)}")
             else:
                 env.write('\n')
 
@@ -2843,8 +2883,8 @@ def maybe_report_elapsed_time() -> None:
 
     if env.log_solving_attempts:
         end = time.monotonic()
-        env.solving_log(f"... {end-env.check_op_start_time:.02f} seconds")
-        env.check_op_start_time = end
+        env.solving_log(f"... {end-env.elapsed_time_track_start_time:.02f} seconds")
+        env.elapsed_time_track_start_time = end
 
         if env.log_solving_attempts_to_stderr:
             env.solving_log("\n")
@@ -2938,12 +2978,12 @@ def add_pubkey_constraints(vchPubKey: 'SymData'
     pub_len = vchPubKey.Length()
     pub = vchPubKey.use_as_ByteSeq()
     if env.witness_pubkeytype_flag and env.sigversion == SigVersion.WITNESS_V0:
-        vchPubKey.set_possible_sizes(33, value_name='CPubKey(...)')
+        vchPubKey.set_possible_sizes(33, value_name='CPubKey')
         Check(And(pub_len == 33, Or(pub[0] == 2, pub[0] == 3)),
               err_invalid_pubkey())
     else:
         if env.strictenc_flag:
-            vchPubKey.set_possible_sizes(33, 65, value_name='CPubKey(...)')
+            vchPubKey.set_possible_sizes(33, 65, value_name='CPubKey')
             Check((pub_len == 33) == Or(pub[0] == 2, pub[0] == 3),
                   err_invalid_pubkey())
             Check((pub_len == 65) == (pub[0] == 4),
@@ -2968,7 +3008,7 @@ def add_xonly_pubkey_constraints(vchPubKey: 'SymData', *,
         Check(vchPubKey.Length() == 32,
               err_invalid_pubkey_length())
 
-        vchPubKey.set_possible_sizes(32, value_name='XOnlyPubKey(...)')
+        vchPubKey.set_possible_sizes(32, value_name='XOnlyPubKey')
 
         maybe_upgradeable_pub = False
     else:
@@ -3114,7 +3154,7 @@ def add_schnorr_sig_constraints(vchSig: 'SymData',
     if not env.z3_enabled and isinstance(is_upgradeable_pub, bool) and \
             not is_upgradeable_pub:
         vchSig.set_possible_sizes(0, 64, 65,
-                                  value_name='SchnorrScignature(...)')
+                                  value_name='SchnorrScignature')
 
     if vchSig.is_static and vchSig.Length() < 65:
         hash_type = 1
@@ -3147,7 +3187,7 @@ def add_amount_constraints(*, prefix: 'SymData', value: 'SymData',
                            ) -> None:
     # can be 32-byte confidential, or 8-byte explicit value
     prefix.set_possible_values(*(bytes([v]) for v in (1, 8, 9)),
-                               value_name='ValuePrefix(...)')
+                               value_name='ValuePrefix')
     value.set_possible_sizes(8, 32)
 
     pfx = prefix.as_ByteSeq()[0]
@@ -3226,7 +3266,7 @@ def add_scriptpubkey_constraints(*, witver: 'SymData', witprog: 'SymData'
     wv = witver.as_ByteSeq()[0]
     # 0x81 is scriptnum -1
     witver.set_possible_values(*(bytes([v]) for v in (0x81, *range(0, 17))),
-                               value_name='WitVer(...)')
+                               value_name='WitVer')
 
     # A witness program is any valid CScript that consists of a 1-byte push opcode
     # followed by a data push between 2 and 40 bytes
@@ -3388,7 +3428,7 @@ def CurrentOp(op_or_sd: Optional[Union['OpCode', 'ScriptData']]
     env = cur_env()
 
     if env.log_solving_attempts:
-        env.check_op_start_time = time.monotonic()
+        env.elapsed_time_track_start_time = time.monotonic()
         if env.do_progressive_z3_checks and \
                 (op_or_sd is None or isinstance(op_or_sd, OpCode)):
             ctx = cur_context()
@@ -3406,7 +3446,7 @@ def CurrentOp(op_or_sd: Optional[Union['OpCode', 'ScriptData']]
         if env.do_progressive_z3_checks and env.log_solving_attempts and \
                 isinstance(op_or_sd, OpCode):
             end = time.monotonic()
-            env.solving_log(f"... {end-env.check_op_start_time:.02f} seconds\n")
+            env.solving_log(f"... {end-env.elapsed_time_track_start_time:.02f} seconds\n")
 
 
 @total_ordering
@@ -4153,6 +4193,19 @@ class ConstrainedValue:
         sizes: Iterable[int] = (),
         values: Iterable[T_ConstrainedValueValue] = ()
     ) -> None:
+        """
+        Container for values with simple constraints (known values or known
+        byte sizes of values)
+
+        The order of values and sizes can be different from the order
+        given in `values` or `sizes` kwargs, or supplied to
+        `set_possible_values()` or `set_possible_sizes()`
+
+        Order of values returned by `possible_values()`, `values_as_*()`
+        are guaranteed to be consistent between invocation of that methods
+        unless `set_possible_values()` or `set_possible_sizes()`
+        is called in between
+        """
 
         if value is not None:
             if values:
@@ -4163,24 +4216,27 @@ class ConstrainedValue:
         if sizes and values:
             raise ValueError('sizes and values are mutually exclusive')
 
-        self._values = set(values)
+        self._values = tuple(set(values))
         self._sizes = set(sizes)
+
+    def clone(self) -> 'ConstrainedValue':
+        return ConstrainedValue(values=self._values, sizes=self._sizes)
 
     @property
     def single_value(self) -> Optional[T_ConstrainedValueValue]:
         if len(self._values) == 1:
-            return next(iter((self._values)))
+            return self._values[0]
 
         return None
 
     @property
     def possible_values(self) -> tuple[T_ConstrainedValueValue, ...]:
-        return tuple(self._values)
+        return self._values
 
     @property
     def possible_sizes(self) -> tuple[int, ...]:
         if self._values:
-            return tuple(len(self._value_as_bytes(v)) for v in self._values)
+            return tuple(len(self.convert_to_bytes(v)) for v in self._values)
 
         return tuple(self._sizes)
 
@@ -4196,7 +4252,7 @@ class ConstrainedValue:
             if isinstance(v, bytearray):
                 v = bytes(v)
 
-            vdict[self._value_as_bytes(v)] = v
+            vdict[self.convert_to_bytes(v)] = v
 
         if self._sizes:
             szset = set(len(bv) for bv in vdict.keys())
@@ -4207,7 +4263,7 @@ class ConstrainedValue:
 
         bvset = set(vdict.keys())
         if self._values:
-            old_bvset = set(self._value_as_bytes(v) for v in self._values)
+            old_bvset = set(self.convert_to_bytes(v) for v in self._values)
             new_bvset = bvset & old_bvset
             if not new_bvset:
                 raise ScriptFailure(
@@ -4220,7 +4276,7 @@ class ConstrainedValue:
 
         self.value_name = value_name
         self._sizes = set()  # sizes will now be taken from value byte-lengths
-        self._values = set(vdict[bv] for bv in new_bvset)
+        self._values = tuple(vdict[bv] for bv in new_bvset)
 
     def set_possible_sizes(self, *_sizes: int, value_name: str = '') -> None:
         if not _sizes:
@@ -4248,12 +4304,14 @@ class ConstrainedValue:
         self.value_name = value_name
 
         if self._values:
-            for v in self._values.copy():
-                vb = self._value_as_bytes(v)
+            vset = set(self._values)
+            for v in vset:
+                vb = self.convert_to_bytes(v)
                 if len(vb) not in new_sizes:
-                    self._values.remove(v)
+                    vset.remove(v)
 
-            assert self._values, "at least one value must remain"
+            assert vset, "at least one value must remain"
+            self._values = tuple(vset)
         else:
             self._sizes = new_sizes
 
@@ -4283,7 +4341,7 @@ class ConstrainedValue:
         if v is None:
             raise ValueError('single value is not available')
 
-        return self._value_as_bytes(v)
+        return self.convert_to_bytes(v)
 
     def values_as_bool(self) -> tuple[bool, ...]:
         return tuple(self._value_as_bool(v) for v in self._values)
@@ -4324,10 +4382,10 @@ class ConstrainedValue:
         return tuple(le64_values)
 
     def values_as_bytes(self) -> tuple[bytes, ...]:
-        return tuple(self._value_as_bytes(v) for v in self._values)
+        return tuple(self.convert_to_bytes(v) for v in self._values)
 
     def _value_as_bool(self, v: T_ConstrainedValueValue) -> bool:
-        vb = self._value_as_bytes(v)
+        vb = self.convert_to_bytes(v)
         for i, b in enumerate(vb):
             if b:
                 is_negative_zero = (b == 0x80 and (i == len(vb)-1))
@@ -4361,11 +4419,12 @@ class ConstrainedValue:
         if isinstance(v, int):
             vb = struct.pack(b'<q', v)
         else:
-            vb = self._value_as_bytes(v)
+            vb = self.convert_to_bytes(v)
 
         return IntLE64(vb).as_int()
 
-    def _value_as_bytes(self, v: Union[int, str, bytes, 'IntLE64']) -> bytes:
+    @classmethod
+    def convert_to_bytes(self, v: Union[int, str, bytes, 'IntLE64']) -> bytes:
         if isinstance(v, int):
             return integer_to_scriptnum(v)
         elif isinstance(v, bytes):
@@ -4595,16 +4654,16 @@ class ExecState:
     def __repr__(self) -> str:
         parts = []
         if self.stack:
-            parts.append(
-                "  stack:\n\t" + "\n\t".join(repr(elt)
-                                             for elt in reversed(self.stack)))
+            parts.append(f"  stack:\n{INDENT}"
+                         + f"\n{INDENT}".join(repr(elt)
+                                              for elt in reversed(self.stack)))
         else:
             parts.append("  stack: <empty>")
 
         if self.altstack:
-            parts.append("  altstack:\n\t"
-                         + "\n\t".join(repr(elt)
-                                       for elt in reversed(self.altstack)))
+            parts.append(f"  altstack:\n{INDENT}"
+                         + f"\n{INDENT}".join(repr(elt)
+                                              for elt in reversed(self.altstack)))
 
         if self.vfExec:
             parts.append(f'  vfExec: {self.vfExec}')
@@ -4625,7 +4684,6 @@ class ExecContext(SupportsFailureCodeCallbacks):
     tx: TransactionFieldValues
     _run_on_start: list[Callable[[], None]]
     _z3_on_start: list['z3.BoolRef']
-    _set_of_single_value_data: set[str]
     _used_as_Int_maxsize: dict[str, tuple[int, int]]
     _enforcement_condition_positions: dict[str, set[int]]
     _data_refcounts: dict[str, int]
@@ -4663,7 +4721,6 @@ class ExecContext(SupportsFailureCodeCallbacks):
         self.z3_used_types_for_vars = z3_used_types_for_vars or {}
         self._run_on_start = []
         self._z3_on_start = []
-        self._set_of_single_value_data = set()
         self._used_as_Int_maxsize = {}
         self._enforcement_condition_positions = {}
         self._data_refcounts = {}
@@ -4673,6 +4730,7 @@ class ExecContext(SupportsFailureCodeCallbacks):
         self.data_placeholders_with_assumptions_applied = set()
         self.data_references: dict[str, 'SymData'] = {}
         self.sig_check_operations: list[tuple[int, 'OpCode', 'SymData']] = []
+        self.hash_operations: list[tuple[int, 'OpCode', 'SymData']] = []
         self.matched_model_values: list['SymData'] = []
 
     @property
@@ -4715,7 +4773,6 @@ class ExecContext(SupportsFailureCodeCallbacks):
         inst.is_finalized = self.is_finalized
         inst.max_combined_stack_len = self.max_combined_stack_len
         inst.num_expunged_witnesses = self.num_expunged_witnesses
-        inst._set_of_single_value_data = self._set_of_single_value_data.copy()
         inst._used_as_Int_maxsize = self._used_as_Int_maxsize.copy()
         inst._enforcement_condition_positions = \
             deepcopy(self._enforcement_condition_positions)
@@ -4989,6 +5046,8 @@ class SymData:
 
         self._failcodes: dict[str, 'FailureCodeDispatcher'] = {}
 
+        self.num_model_value_samples: int = 0
+
     def get_failcode_dispatcher(self, prefix: str) -> 'FailureCodeDispatcher':
         fc = self._failcodes.get(prefix)
         if fc is None:
@@ -5012,13 +5071,6 @@ class SymData:
     @property
     def args(self) -> tuple['SymData', ...]:
         return self._args
-
-    @property
-    def is_only_one_value_possible(self) -> bool:
-        return self._unique_name in cur_context()._set_of_single_value_data
-
-    def mark_as_only_one_value_possible(self) -> None:
-        cur_context()._set_of_single_value_data.add(self._unique_name)
 
     @property
     def unique_name(self) -> str:
@@ -5083,12 +5135,7 @@ class SymData:
         return cur_context().constrained_values.get(self._unique_name)
 
     def set_static(self, v: Union[T_ConstrainedValueValue, bytearray]) -> None:
-        ctx = cur_context()
-        cv = ctx.constrained_values.get(self._unique_name) or ConstrainedValue()
-        cv.set_possible_values(v)
-        ctx.constrained_values[self._unique_name] = cv
-        self.mark_as_only_one_value_possible()
-        self.update_solver_for_constrained_value(cv)
+        self.set_possible_values(v)
 
     def set_possible_values(
         self, *_values: Union[T_ConstrainedValueValue, bytearray],
@@ -5206,26 +5253,7 @@ class SymData:
         if cv is not None:
             cur_context().model_values[self._unique_name] = cv
 
-    def model_repr(self) -> str | None:
-        mv = self.get_model_value()
-        if mv is not None:
-            return repr(mv)
-
-        if cv := self.get_constrained_value():
-            if cv.value_name:
-                return cv.value_name
-
-            return repr(cv)
-
-        return None
-
     def get_model_value(self) -> ConstrainedValue | None:
-        if cv := self.get_constrained_value():
-            pvals = cv.possible_values
-            if pvals:
-                if len(pvals) == 1:
-                    return cv
-
         if model_cv := cur_context().model_values.get(self._unique_name):
             return model_cv
 
@@ -5637,24 +5665,74 @@ class SymData:
             assert name not in namemap
             namemap[name] = self
 
-    def check_only_one_value_possible(self, *, name: str = '') -> None:
-        if cv := cur_context().model_values.get(self._unique_name):
-            if cv.single_value is None:
-                return
+    def add_model_value_samples(self, *, name: str = '') -> None:  # noqa
+        count = self.num_model_value_samples
+        if count == 0:
+            return
+
+        env = cur_env()
+        ctx = cur_context()
+
+        if mv := ctx.model_values.get(self._unique_name):
+            if cv_check := self.get_constrained_value():
+                cv_check = cv_check.clone()
+
+            if count > 1:
+                env.write(f'up to {count} samples for {self} ')
+            else:
+                env.write(f'1 sample for {self} ')
+
+            env.elapsed_time_track_start_time = time.monotonic()
 
             if self.was_used_as_Int:
-                max_size, _ = self._get_used_as_Int_maxsize()
-                check_exp = self.as_Int() != cv.as_scriptnum_int(max_size=max_size)
-            elif self.was_used_as_Int64:
-                check_exp = self.as_Int64() != cv.as_le64()
-            elif self.was_used_as_ByteSeq:
-                check_exp = self.as_ByteSeq() != IntSeqVal(cv.as_bytes())
-            else:
-                return
+                max_scriptnum_size, _ = self._get_used_as_Int_maxsize()
+                known_int_values = list(mv.values_as_scriptnum_int(max_size=max_scriptnum_size))
+                diff_count = count - len(known_int_values) + 1
+                if diff_count > 0:
+                    known_int_values.extend(
+                        self.collect_integer_model_values(
+                            max_count=diff_count,
+                            max_scriptnum_size=max_scriptnum_size,
+                            known_values=known_int_values,
+                            prefer_distinct_lengths=True))
+                    ctx.model_values[self._unique_name] = \
+                        ConstrainedValue(values=known_int_values)
 
-            if not is_cond_possible(check_exp, self, name=name,
-                                    fail_msg='  - only one possible value'):
-                self.mark_as_only_one_value_possible()
+                # If constrained values are set, model values must match
+                if cv_check:
+                    cv_check.set_possible_values(*known_int_values)
+            elif self.was_used_as_Int64:
+                known_Int64_values = list(IntLE64.from_int(v) for v in mv.values_as_le64())
+                diff_count = count - len(known_Int64_values) + 1
+                if diff_count > 0:
+                    known_Int64_values.extend(
+                        self.collect_Int64_model_values(
+                            max_count=diff_count, known_values=known_Int64_values))
+                    ctx.model_values[self._unique_name] = \
+                        ConstrainedValue(values=known_Int64_values)
+
+                # If constrained values are set, model values must match
+                if cv_check:
+                    cv_check.set_possible_values(*known_Int64_values)
+            elif self.was_used_as_ByteSeq:
+                known_byte_values = list(mv.values_as_bytes())
+                diff_count = count - len(known_byte_values) + 1
+                if diff_count > 0:
+                    known_byte_values.extend(
+                        self.collect_byte_model_values(
+                            max_count=diff_count, known_values=known_byte_values,
+                            prefer_distinct_lengths=True))
+                    ctx.model_values[self._unique_name] = \
+                        ConstrainedValue(values=known_byte_values)
+
+                # If constrained values are set, model values must match
+                if cv_check:
+                    cv_check.set_possible_values(*known_byte_values)
+            else:
+                pass
+
+            maybe_report_elapsed_time()
+            env.ensure_newline()
 
     @property
     def known_bool_value(self) -> bool | None:
@@ -5666,56 +5744,164 @@ class SymData:
 
         cur_context().known_bool_values[self._unique_name] = value
 
-    def collect_integer_model_values(self, max_count: int) -> list[int]:
+    def collect_integer_model_values(  # noqa
+        self, max_count: int, known_values: Iterable[int] = (),
+        max_scriptnum_size: int = 4, prefer_distinct_lengths: bool = False,
+        distinct_lengths_only: bool = False
+    ) -> list[int]:
+
+        if distinct_lengths_only:
+            prefer_distinct_lengths = True
 
         if not self.was_used_as_Int:
             raise ValueError(f'{self} was not used as scriptnum yet')
 
         result: list[int] = []
 
+        if self.is_static:
+            return result
+
+        cur_known_values = list(known_values)
+
+        def exclude_value(v: int) -> None:
+            if prefer_distinct_lengths:
+                snlen = len(integer_to_scriptnum(v))
+                if snlen == 0:
+                    Check(self.as_Int() != 0)
+                elif snlen == 1:
+                    Check(Or(Abs(self.as_Int()) < 1,
+                             Abs(self.as_Int()) > 127))
+                else:
+                    Check(Or(Abs(self.as_Int()) < 2**((snlen-1)*8-1),
+                             Abs(self.as_Int()) > 2**(snlen*8-1)-1))
+            else:
+                Check(self.as_Int() != v)
+
         def collect(mvdict: Optional[dict[str, 'ConstrainedValue']]) -> bool:
 
             if mvdict is None:  # init call
-                # Add dummy check to make sure the solver knows about our value
-                # Note that the check must not be reduced to True by simplifying
-                # For that, we introduce a dummy unconstrained variable
-                dummy_value = SymData(unique_name=f'_dummy_{self._unique_name}')
-                Check(self.as_Int() == dummy_value.as_Int())
+                if not cur_known_values:
+                    # Add dummy check to make sure the solver knows about our value
+                    # Note that the check must not be reduced to True by simplifying
+                    # For that, we introduce a dummy unconstrained variable
+                    dummy_value = SymData(unique_name=f'_dummy_{self._unique_name}')
+                    Check(self.as_Int() == dummy_value.as_Int())
+                else:
+                    for v in cur_known_values:
+                        exclude_value(v)
+
                 return True
 
             if self._name_Int not in mvdict:
                 return False
 
-            v = mvdict[self._name_Int].as_scriptnum_int()
+            v = mvdict[self._name_Int].as_scriptnum_int(
+                max_size=max_scriptnum_size)
 
             result.append(v)
 
             if len(result) == max_count:
                 return False
 
-            Check(self.as_Int() != v)
+            exclude_value(v)
 
             return True
 
         collect_model_values([self], collect, preferred_rtype=SymDataRType.INT)
 
+        if prefer_distinct_lengths:
+            assert len(set(len(integer_to_scriptnum(v)) for v in result)) == len(result)
+            if len(result) < max_count and not distinct_lengths_only:
+                prefer_distinct_lengths = False
+                cur_known_values.extend(result)
+                collect_model_values([self], collect, preferred_rtype=SymDataRType.INT)
+
         return result
 
-    def collect_byte_model_values(self, max_count: int) -> list[bytes]:
+    def collect_Int64_model_values(
+        self, max_count: int, known_values: Iterable[IntLE64] = (),
+    ) -> list[IntLE64]:
+
+        if not self.was_used_as_Int64:
+            raise ValueError(f'{self} was not used as Int64 yet')
+
+        result: list[IntLE64] = []
+
+        if self.is_static:
+            return result
+
+        def collect(mvdict: Optional[dict[str, 'ConstrainedValue']]) -> bool:
+
+            if mvdict is None:  # init call
+                if not known_values:
+                    # Add dummy check to make sure the solver knows about our value
+                    # Note that the check must not be reduced to True by simplifying
+                    # For that, we introduce a dummy unconstrained variable
+                    dummy_value = SymData(unique_name=f'_dummy_{self._unique_name}')
+                    Check(self.as_Int64() == dummy_value.as_Int64())
+                else:
+                    Check(And([self.as_Int64() != v.as_int() for v in known_values]))
+
+                return True
+
+            if self._name_Int64 not in mvdict:
+                return False
+
+            v = mvdict[self._name_Int64].as_le64()
+
+            result.append(IntLE64.from_int(v))
+
+            if len(result) == max_count:
+                return False
+
+            Check(self.as_Int64() != v)
+
+            return True
+
+        collect_model_values([self], collect, preferred_rtype=SymDataRType.INT64)
+
+        return result
+
+    def collect_byte_model_values(  # noqa
+        self, max_count: int, known_values: Iterable[bytes] = (),
+        prefer_distinct_lengths: bool = False, distinct_lengths_only: bool = False
+    ) -> list[bytes]:
+
+        if distinct_lengths_only:
+            prefer_distinct_lengths = True
 
         if not self.was_used_as_ByteSeq:
             raise ValueError(f'{self} was not used as ByteSeq yet')
 
         result: list[bytes] = []
 
+        if self.is_static:
+            return result
+
+        cur_known_values = list(known_values)
+
+        def exclude_value(v: bytes) -> None:
+            if prefer_distinct_lengths:
+                if self._Length is None:
+                    Check(Length(self.as_ByteSeq()) != len(v))
+                else:
+                    Check(self._Length != len(v))
+            else:
+                Check(self.as_ByteSeq() != IntSeqVal(v))
+
         def collect(mvdict: Optional[dict[str, 'ConstrainedValue']]) -> bool:
 
             if mvdict is None:  # init call
-                # Add dummy check to make sure the solver knows about our value
-                # Note that the check must not be reduced to True by simplifying
-                # For that, we introduce a dummy unconstrained variable
-                dummy_value = SymData(unique_name=f'_dummy_{self._unique_name}')
-                Check(self.as_ByteSeq() == dummy_value.as_ByteSeq())
+                if not cur_known_values:
+                    # Add dummy check to make sure the solver knows about our value
+                    # Note that the check must not be reduced to True by simplifying
+                    # For that, we introduce a dummy unconstrained variable
+                    dummy_value = SymData(unique_name=f'_dummy_{self._unique_name}')
+                    Check(self.as_ByteSeq() == dummy_value.as_ByteSeq())
+                else:
+                    for v in cur_known_values:
+                        exclude_value(v)
+
                 return True
 
             if self._name_ByteSeq not in mvdict:
@@ -5728,11 +5914,18 @@ class SymData:
             if len(result) == max_count:
                 return False
 
-            Check(self.as_ByteSeq() != IntSeqVal(v))
+            exclude_value(v)
 
             return True
 
         collect_model_values([self], collect, preferred_rtype=SymDataRType.BYTESEQ)
+
+        if prefer_distinct_lengths:
+            assert len(set(len(v) for v in result)) == len(result)
+            if len(result) < max_count and not distinct_lengths_only:
+                prefer_distinct_lengths = False
+                cur_known_values.extend(result)
+                collect_model_values([self], collect, preferred_rtype=SymDataRType.BYTESEQ)
 
         return result
 
@@ -5889,6 +6082,9 @@ def apply_bsst_assn(ctx: ExecContext, assn: BsstAssertion | BsstAssumption,
 
 def check_bsst_assertions_and_assumptions(ctx: ExecContext) -> None:  # noqa
     env = cur_env()
+
+    if not env.z3_enabled:
+        return
 
     if len(ctx.stack):
         top = ctx.stack[-1]
@@ -6097,11 +6293,11 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
     elif op == OP_0:
 
-        push(SymData(name=op.name, static_value=b''))
+        push(SymData(static_value=b''))
 
     elif op == OP_1NEGATE or ((op >= OP_1) and (op <= OP_16)):
 
-        push(SymData(name=op.name, static_value=(int(op) - (int(OP_1) - 1))))
+        push(SymData(static_value=(int(op) - (int(OP_1) - 1))))
 
     elif op == OP_CHECKLOCKTIMEVERIFY:
         def scope() -> None:
@@ -7041,6 +7237,8 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                     Check(z3.ForAll(
                         seq, (sym_fun(seq) == sym_fun(data)) == (seq == data)))
 
+            ctx.hash_operations.append((ctx.pc, op, r))
+
             z3check()
 
             popstack()
@@ -7521,7 +7719,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                     outpoint_flag.use_as_ByteSeq()
                     outpoint_flag.set_possible_values(
                         *(bytes([v]) for v in (0, 64, 128, 128 | 64)),
-                        value_name='OutpointFlag(...)')
+                        value_name='OutpointFlag')
 
                     tx.input_outpoint_flag[index] = outpoint_flag
 
@@ -7548,7 +7746,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                 if not asset:
                     asset = SymData(name='INPUT_%_ASSET', args=(bn,))
                     asset.use_as_ByteSeq()
-                    asset.set_possible_sizes(32, value_name='Asset(...)')
+                    asset.set_possible_sizes(32, value_name='Asset')
                     tx.input_asset[index] = asset
 
                 pfx = tx.input_asset_prefix.get_known(index)
@@ -7556,7 +7754,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                     pfx = SymData(name='INPUT_%_ASSET_PREFIX', args=(bn,))
                     pfx.use_as_ByteSeq()
                     pfx.set_possible_values(*(bytes([v]) for v in (1, 10, 11)),
-                                            value_name='AssetPrefix(...)')
+                                            value_name='AssetPrefix')
                     tx.input_asset_prefix[index] = pfx
 
                 z3check()
@@ -7637,7 +7835,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                 nSequence = tx.nSequence.get_known(index)
                 if not nSequence:
                     nSequence = SymData(name='INPUT_%_SEQUENCE', args=(bn,))
-                    nSequence.set_possible_sizes(4, value_name='LE32(...)')
+                    nSequence.set_possible_sizes(4, value_name='LE32')
                     nSequence.use_as_ByteSeq()
                     tx.nSequence[index] = nSequence
 
@@ -7677,7 +7875,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                         possible_sizes=(32,))
                     asset_entropy = SymData(name='INPUT_%_ISSUANCE_ASSETENTROPY',
                                             args=(bn,))
-                    asset_entropy.set_possible_sizes(32, value_name='AssetEntropy(...)')
+                    asset_entropy.set_possible_sizes(32, value_name='AssetEntropy')
 
                     infkeys.use_as_ByteSeq()
                     infk_pfx.use_as_ByteSeq()
@@ -7778,7 +7976,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                 if not asset:
                     asset = SymData(name='OUTPUT_%_ASSET', args=(bn,))
                     asset.use_as_ByteSeq()
-                    asset.set_possible_sizes(32, value_name='Asset(...)')
+                    asset.set_possible_sizes(32, value_name='Asset')
                     tx.output_asset[index] = asset
 
                 pfx = tx.output_asset_prefix.get_known(index)
@@ -7786,7 +7984,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                     pfx = SymData(name='OUTPUT_%_ASSET_PREFIX', args=(bn,))
                     pfx.use_as_ByteSeq()
                     pfx.set_possible_values(*(bytes([v]) for v in (1, 10, 11)),
-                                            value_name='AssetPrefix(...)')
+                                            value_name='AssetPrefix')
                     tx.output_asset_prefix[index] = pfx
 
                 z3check()
@@ -7846,7 +8044,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                 nonce = tx.output_nonce.get_known(index)
                 if not nonce:
                     nonce = SymData(name='OUTPUT_%_NONCE', args=(bn,))
-                    nonce.set_possible_sizes(0, 33, value_name='OutputNonce(...)')
+                    nonce.set_possible_sizes(0, 33, value_name='OutputNonce')
                     nonce.use_as_ByteSeq()
                     tx.output_nonce[index] = nonce
 
@@ -8871,38 +9069,44 @@ def _finalize(ctx: ExecContext, env: SymEnvironment) -> None:  # noqa
     if env.produce_model_values:
         for wit in ctx.used_witnesses:
             assert wit.name
-            if env.model_values_name_match(wit.name):
+            if num_samples := env.model_values_name_match(wit.name):
                 wit.update_model_values_request_dict(mvdict_req, mvnamemap)
+                wit.num_model_value_samples = num_samples
                 processed_mv.append(wit)
 
         for txval in ctx.tx.values():
             assert txval not in processed_mv, \
                 ("only witnesses are processed at this point, tx values"
                     "cannot intersect")
-            if 'tx' in env.produce_model_values_for or \
-                    env.model_values_name_match(f'{txval}'):
+            num_samples = (env.model_values_name_match('tx')
+                           or env.model_values_name_match(f'{txval}'))
+            if num_samples:
                 txval.update_model_values_request_dict(mvdict_req, mvnamemap)
+                txval.num_model_value_samples = num_samples
                 processed_mv.append(txval)
 
         for val in env.data_placeholders.values():
             if val not in processed_mv:
                 assert val.name
-                if env.model_values_name_match(val.name):
+                if num_samples := env.model_values_name_match(val.name):
                     val.update_model_values_request_dict(mvdict_req, mvnamemap)
+                    val.num_model_value_samples = num_samples
                     processed_mv.append(val)
 
         for dref_name, dref in ctx.data_references.items():
             if dref not in processed_mv:
-                if env.model_values_name_match(f'&{dref_name}'):
+                if num_samples := env.model_values_name_match(f'&{dref_name}'):
                     dref.update_model_values_request_dict(mvdict_req, mvnamemap)
+                    dref.num_model_value_samples = num_samples
                     processed_mv.append(dref)
 
         ctx.matched_model_values = processed_mv.copy()
 
-        if 'stack' in env.produce_model_values_for:
+        if num_samples := env.model_values_name_match('stack'):
             for val in ctx.stack:
                 if val not in processed_mv:
                     val.update_model_values_request_dict(mvdict_req, mvnamemap)
+                    val.num_model_value_samples = num_samples
                     processed_mv.append(val)
 
     if env.log_progress:
@@ -8938,54 +9142,54 @@ def _finalize(ctx: ExecContext, env: SymEnvironment) -> None:  # noqa
 
     env.solving_log_ensure_empty_line()
 
-    if env.produce_model_values:
-        mvdict = mvdict or {}
-        for name, val in mvnamemap.items():
-            val.set_model_value(mvdict.get(name))
+    if env.z3_enabled:
+        if env.produce_model_values:
+            mvdict = mvdict or {}
+            for name, val in mvnamemap.items():
+                val.set_model_value(mvdict.get(name))
 
-    if env.log_progress and ctx.z3_warning_vars:
-        print_as_header('Checking for possible warnings', level=2,
-                        is_solving=True)
+        if env.log_progress and ctx.z3_warning_vars:
+            print_as_header('Checking for possible warnings', level=2,
+                            is_solving=True)
 
-    for pc, ww in ctx.z3_warning_vars:
-        if is_cond_possible(ww.as_Int() == 1, ww,
-                            name=f'{ww.name} @ {op_pos_info(pc)}',
-                            fail_msg='  - not possible'):
-            assert ww.name
-            ctx.warnings.append((pc, ww.name))
+        for pc, ww in ctx.z3_warning_vars:
+            if is_cond_possible(ww.as_Int() == 1, ww,
+                                name=f'{ww.name} @ {op_pos_info(pc)}',
+                                fail_msg='  - not possible'):
+                assert ww.name
+                ctx.warnings.append((pc, ww.name))
 
-    verify_targets: list[Enforcement] = []
-    if not env.use_z3_incremental_mode:
-        for e in ctx.enforcements:
-            if e.pc >= len(env.script_info.body):
-                op = None
-            else:
-                op = env.script_info.body[e.pc]
+        verify_targets: list[Enforcement] = []
+        if not env.use_z3_incremental_mode:
+            for e in ctx.enforcements:
+                if e.pc >= len(env.script_info.body):
+                    op = None
+                else:
+                    op = env.script_info.body[e.pc]
 
-            is_verify_target = (op is None
-                                or op in (OP_VERIFY, OP_EQUALVERIFY,
-                                          OP_NUMEQUALVERIFY)
-                                # 'bugbyte' check
-                                or (op == OP_CHECKMULTISIGVERIFY
-                                    and e.cond.name == 'EQUAL'))
-            if is_verify_target:
-                verify_targets.append(e)
+                is_verify_target = (op is None
+                                    or op in (OP_VERIFY, OP_EQUALVERIFY,
+                                              OP_NUMEQUALVERIFY)
+                                    # 'bugbyte' check
+                                    or (op == OP_CHECKMULTISIGVERIFY
+                                        and e.cond.name == 'EQUAL'))
+                if is_verify_target:
+                    verify_targets.append(e)
 
-    if env.produce_model_values:
-        with IsolatedSolverContext():
-            if env.log_progress and mvdict_req:
-                print_as_header('Checking for non-variable model values',
+        if env.produce_model_values:
+            with IsolatedSolverContext():
+                if env.log_progress and mvdict_req:
+                    print_as_header('Producing model value samples',
+                                    level=2, is_solving=True)
+
+                for val in processed_mv:
+                    val.add_model_value_samples()
+
+        if env.check_always_true_enforcements and verify_targets:
+            if env.log_progress:
+                print_as_header('Checking for always-true enforcements',
                                 level=2, is_solving=True)
 
-            for val in set(mvnamemap.values()):
-                val.check_only_one_value_possible()
-
-    if env.check_always_true_enforcements and verify_targets:
-        if env.log_progress:
-            print_as_header('Checking for always-true enforcements',
-                            level=2, is_solving=True)
-
-        with IsolatedSolverContext():
             for e in verify_targets:
                 global g_skip_assertion_for_enforcement_condition
                 g_skip_assertion_for_enforcement_condition = (e.cond, e.pc)
@@ -9032,7 +9236,7 @@ def data_reference_names_show() -> None:
     g_seen_named_values.clear()
     try:
         for data_reference_names, val in get_data_reference_names_rec():
-            cur_env().write_line(f'\t{" = ".join(data_reference_names)} = {val}')
+            cur_env().write_line(f'{INDENT}{" = ".join(data_reference_names)} = {val}')
     finally:
         g_seen_named_values.clear()
 
@@ -9105,15 +9309,6 @@ def report() -> None:  # noqa
     got_failures = False
     got_successes = False
 
-    def model_value_line(sd: SymData) -> str:
-        mr = sd.model_repr()
-
-        if sd.is_only_one_value_possible:
-            assert mr
-            return f'= {mr}'
-
-        return f': {mr or "?"}'
-
     def process_enf_paths(bp: Branchpoint, level: int) -> None:
         nonlocal got_successes
         nonlocal got_warnings
@@ -9130,27 +9325,87 @@ def report() -> None:  # noqa
             mvals_list = []
 
             if env.produce_model_values:
-                def get_val_str(v: SymData) -> str:
-                    return model_value_line(v)
+                def get_val_str(prefix: str, sd: SymData) -> str:
+                    if cv := sd.get_model_value():
+                        num_samples = sd.num_model_value_samples
+                    else:
+                        cv = sd.get_constrained_value()
+                        num_samples = len(cv.possible_values) if cv else 0
+
+                    if not cv or not cv.possible_values:
+                        return f'{prefix} : ?'
+
+                    result: list[str] = []
+                    shown_sizes: set[int] = set()
+
+                    if cv.single_value is not None:
+                        result.append(f'{prefix} = {cv}')
+                        shown_sizes.add(len(cv.as_bytes()))
+                        got_more_sizes = False
+                    else:
+                        distinct_size_values = {
+                            len(cv.convert_to_bytes(v)): cv.possible_values[i]
+                            for i, v in enumerate(cv.possible_values)
+                        }
+
+                        vals = list(distinct_size_values.values()) + \
+                            list(set(cv.possible_values) - set(distinct_size_values.values()))
+
+                        assert len(vals) == len(cv.possible_values)
+
+                        for i, v in enumerate(vals):
+                            if i >= num_samples:
+                                if num_samples > 1:
+                                    result.append(f'{" "*len(prefix)} : ...')
+
+                                break
+
+                            if i == 0:
+                                result.append(f'{prefix} : {value_common_repr(v)}')
+                            else:
+                                result.append(
+                                    f'{" "*len(prefix)} : {value_common_repr(v)}')
+
+                            shown_sizes.add(len(ConstrainedValue.convert_to_bytes(v)))
+                        else:
+                            result.append(f'{" "*len(prefix)} : ---')
+
+                        got_more_sizes = len(shown_sizes) != len(distinct_size_values.keys())
+
+                    if env.report_model_value_sizes:
+                        size_strings = [str(sz) for sz in shown_sizes]
+                        if got_more_sizes:
+                            size_strings.append('...')
+
+                        result.append(
+                            f'SIZE{"S" if len(size_strings) > 1 else ""}: '
+                            f'{", ".join(size_strings)}')
+
+                        result.append('')
+
+                    return '\n'.join(result)
 
                 for val in bp.context.matched_model_values:
                     for dref_name, dref in bp.context.data_references.items():
                         if dref == val:
                             mvals_list.append(
-                                f'&{dref_name} = {val} {get_val_str(val)}')
+                                get_val_str(f'&{dref_name} = {val}', val))
                             break
                     else:
-                        mvals_list.append(f'{val} {get_val_str(val)}')
+                        mvals_list.append(get_val_str(f'{val}', val))
             else:
-                def get_val_str(v: SymData) -> str:
-                    return ': ?'
+                def get_val_str(prefix: str, sd: SymData) -> str:
+                    if sd.is_static:
+                        return f'{prefix} = {sd}'
+                    else:
+                        return f'{prefix} : ?'
 
-            if 'stack' in env.produce_model_values_for:
-                def maybe_add_deref(val: SymData, vname: str) -> str:
+            if env.model_values_name_match('stack'):
+                def maybe_add_dref(val: SymData, vname: str) -> str:
                     assert bp.context
                     for dref_name, dref in bp.context.data_references.items():
                         if dref == val:
-                            return f'= &{dref_name} {vname}'
+                            return f' = &{dref_name}{vname}'
 
                     return vname
 
@@ -9158,9 +9413,11 @@ def report() -> None:  # noqa
                 if not env.cleanstack_flag and stack_len > 0:
                     for i, val in enumerate(reversed(bp.context.stack)):
                         pos = -(i+1)
-                        vname = '' if not val._name else f'= {val} '
-                        mvals_list.append(f'stack[{pos}] {maybe_add_deref(val, vname)}'
-                                          f'{get_val_str(val)}')
+                        vname = '' if not val._name else f' = {val}'
+                        mvals_list.append(
+                            get_val_str(
+                                f'stack[{pos}]{maybe_add_dref(val, vname)}',
+                                val))
                 elif stack_len:
                     assert stack_len == 1, \
                         "context should have failure set otherwise"
@@ -9168,8 +9425,10 @@ def report() -> None:  # noqa
                     if mvals_list:
                         mvals_list.append('')
 
-                    vname = '' if not top._name else f'= {top} '
-                    mvals_list.append(f'<result> {maybe_add_deref(top, vname)}{get_val_str(top)}')
+                    vname = '' if not top._name else f' = {top}'
+                    mvals_list.append(
+                        get_val_str(
+                            f'<result>{maybe_add_dref(top, vname)}', top))
                 else:
                     assert stack_len == 0
                     assert env.is_incomplete_script, \
@@ -9246,7 +9505,7 @@ def report() -> None:  # noqa
             combined_uvs = list(uvset)
             combined_uvs.sort(key=lambda v: v[1])
             for uvstr, src_pc in combined_uvs:
-                env.write_line(f'\t{uvstr} from {op_pos_info(src_pc)}')
+                env.write_line(f'{INDENT}{uvstr} from {op_pos_info(src_pc)}')
 
     if model_values_map:
         path_msg = 'per path' if len(model_values_map) > 1 else 'for all valid paths'
@@ -9269,14 +9528,14 @@ def report() -> None:  # noqa
             env.write_line(f"Witnesses used: {num_witnesses}")
             env.ensure_empty_line()
 
-            if env.produce_model_values or env.is_incomplete_script:
-                if not env.produce_model_values:
-                    env.write_line('Stack values:')
-                else:
-                    env.write_line('Model values:')
+            if env.produce_model_values:
+                env.write_line('Model values:')
+            else:
+                env.write_line('Stack values:')
 
-                for ws in mvals:
-                    env.write_line(f'\t{ws}')
+            for ws in mvals:
+                for ln in ws.split('\n'):
+                    env.write_line(f'{INDENT}{ln}')
 
     env.ensure_empty_line()
 
@@ -9296,7 +9555,7 @@ def report() -> None:  # noqa
                 for pc, w in ctx.warnings:
                     w_str = f'{w} @ {op_pos_info(pc)}'
                     if w_str not in shown_warnings:
-                        env.write_line(f'\t{w_str}')
+                        env.write_line(f'{INDENT}{w_str}')
                         shown_warnings.add(w_str)
 
                     env.ensure_empty_line()
@@ -9337,7 +9596,7 @@ def report() -> None:  # noqa
 
                     with VarnamesDisplay(show_assignments=True):
                         for e in ctx.enforcements:
-                            env.write_line(f'\t{repr(e)}')
+                            env.write_line(f'{INDENT}{repr(e)}')
 
                     env.ensure_empty_line()
 
@@ -9350,7 +9609,7 @@ def report() -> None:  # noqa
         pc_list = []
         for poi in points_of_interest:
             if isinstance(poi, int):
-                pc_list.append(poi)
+                pc_list.append(int(poi))
             else:
                 assert poi.startswith('L')
                 line_no = int(poi[1:])

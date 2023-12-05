@@ -78,15 +78,18 @@ IF wit0 @ 9:L10 : False
 
 Data references:
 ----------------
-	b1 = x = ADD(wit0, wit0)
-	b4 = ADD(&b3, &b3)
-	b3 = ADD(&b2, &b2)
-	b2 = z = ADD(wit1, wit1)
+        b1 = x = ADD(wit0, wit0)
+        b4 = ADD(&b3, &b3)
+        b3 = ADD(&b2, &b2)
+        b2 = z = ADD(wit1, wit1)
 
 ==================================
 Witness usage for all valid paths:
 ==================================
 Witnesses used: 2
+
+Stack values:
+        <result> = 1
 
 """  # noqa
 
@@ -121,13 +124,26 @@ IF wit0 @ 0:L1 : False
 
 Data references:
 ----------------
-	x = 1
-	x' = 2
+        x = 1
+        x' = 2
 
-==================================
-Witness usage for all valid paths:
-==================================
+=======================
+Witness usage per path:
+=======================
+
+IF wit0 @ 0:L1 : True
+---------------------
 Witnesses used: 1
+
+Stack values:
+        <result> = &x = 1
+
+IF wit0 @ 0:L1 : False
+----------------------
+Witnesses used: 1
+
+Stack values:
+        <result> = &x = 2
 
 """  # noqa
 

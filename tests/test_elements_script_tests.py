@@ -531,11 +531,10 @@ def process_testcase(
         ctx = valid_contexts[0]
         with bsst.CurrentExecContext(ctx):
             for sd in ctx.stack:
-                mv = sd.get_model_value()
-                if mv is None:
-                    v = None
+                if cv := sd.get_model_value() or sd.get_constrained_value():
+                    v = cv.single_value
                 else:
-                    v = mv.single_value
+                    v = None
 
                 if v is None:
                     v = b'<arbitrary data>'

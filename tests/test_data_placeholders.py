@@ -38,6 +38,9 @@ Witness usage for all valid paths:
 ==================================
 Witnesses used: 0
 
+Stack values:
+        <result> = EQUAL(ADD($a, 1), SUB(ADD($a, 2), 1)) : ?
+
 """
 
 
