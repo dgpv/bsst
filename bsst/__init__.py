@@ -238,18 +238,18 @@ class SymEnvironment:
         self._comment_marker = value
 
     @property
-    def points_of_interest(self) -> set[int | str]:
+    def points_of_interest(self) -> list[str | int]:
         """A set of "points" in the script to report the execution state at,
         in addition to the usual information in the report.
         The "point" can be an integer - that means the program counter position
         in the script, or the string "L<num>" where "<num>" is the line number
         in the text of the script
         """
-        return self._points_of_interest
+        return self._points_of_interest.copy()
 
     @points_of_interest.setter
     def points_of_interest(self, values: Iterable[str]) -> None:
-        result_set: set[int | str] = set()
+        result_list: list[int | str] = []
         for poi_str in values:
             poi: int | str
             if poi_str.isdigit():
@@ -272,30 +272,30 @@ class SymEnvironment:
                     raise ValueError(
                         'Negative line value is invalid as POI designation')
 
-            result_set.add(poi)
+            result_list.append(poi)
 
-        self._points_of_interest.update(result_set)
+        self._points_of_interest.extend(result_list)
 
     @property
-    def explicitly_enabled_opcodes(self) -> set[str]:
+    def explicitly_enabled_opcodes(self) -> list[str]:
         """A set of opcodes to explicitly enable
         """
-        return self._explicitly_enabled_opcodes
+        return self._explicitly_enabled_opcodes.copy()
 
     @explicitly_enabled_opcodes.setter
     def explicitly_enabled_opcodes(self, values: Iterable[str]) -> None:
-        result_set: set[str] = set()
+        result_list: list[str] = []
         for v in values:
             v = v.upper()
             if v.startswith('OP_'):
                 v = v[3:]
 
             if v in self.opcode_table:
-                result_set.add(v)
+                result_list.append(v)
             else:
                 raise ValueError('cannot enable opcode that is not recognized')
 
-        self._explicitly_enabled_opcodes.update(result_set)
+        self._explicitly_enabled_opcodes.extend(result_list)
 
     @property
     def produce_model_values(self) -> bool:
@@ -325,7 +325,7 @@ class SymEnvironment:
         self._produce_model_values = value
 
     @property
-    def produce_model_values_for(self) -> set[str]:
+    def produce_model_values_for(self) -> list[str]:
         """A set of patterns to specify which model values to produce,
         if `produce_model_values` is true.
 
@@ -350,14 +350,12 @@ class SymEnvironment:
 
         if not self._is_for_usage_message:
             if not self._z3_enabled:
-                return set()
+                return []
 
-        return self._produce_model_values_for
+        return self._produce_model_values_for.copy()
 
     @produce_model_values_for.setter
     def produce_model_values_for(self, values: Iterable[str]) -> None:
-        result_set: set[str] = set()
-
         for v in values:
             for c in v:
                 if not c.isalnum() and c not in '_?*$&()[]!':
@@ -365,9 +363,7 @@ class SymEnvironment:
                         'unexpected character in pattern to '
                         'specify model values to produce')
 
-            result_set.add(v)
-
-        self._produce_model_values_for = result_set
+        self._produce_model_values_for.extend(list(values))
 
     @property
     def check_always_true_enforcements(self) -> bool:
@@ -1041,23 +1037,23 @@ class SymEnvironment:
         self._max_num_outputs = value
 
     @property
-    def plugins(self) -> set[str]:
+    def plugins(self) -> list[str]:
         """Set of plugins to load (paths to python files with names
         ending in '_bsst_plugin.py')
         """
-        return self._plugins
+        return self._plugins.copy()
 
     @plugins.setter
     def plugins(self, value: Iterable[str]) -> None:
-        plugins_set = set(value)
-        for name in plugins_set:
+        plugins_list = list(value)
+        for name in plugins_list:
             if not name.endswith(PLUGIN_FILE_SUFFIX):
                 raise ValueError(
                     f'plugin file names must end with \'{PLUGIN_FILE_SUFFIX}\'')
             if not os.path.exists(name):
                 raise ValueError('plugin file does not exist')
 
-        self._plugins.update(plugins_set)
+        self._plugins.extend(plugins_list)
 
         self.load_plugin_modules()
 
@@ -1067,8 +1063,8 @@ class SymEnvironment:
         self._z3_enabled = False
         self._z3_debug = False
         self._comment_marker = '//'
-        self._points_of_interest: set[int | str] = set()
-        self._explicitly_enabled_opcodes: set[str] = set()
+        self._points_of_interest: list[int | str] = []
+        self._explicitly_enabled_opcodes: list[str] = []
         self._use_z3_incremental_mode = False
         self._use_parallel_solving = True
         self._parallel_solving_num_processes = 0
@@ -1092,7 +1088,7 @@ class SymEnvironment:
         self._log_solving_attempts = True
         self._log_solving_attempts_to_stderr = False
         self._produce_model_values = True
-        self._produce_model_values_for = {'stack', 'tx', 'wit*'}
+        self._produce_model_values_for: list[str] = ['stack', 'tx', 'wit*']
         self._check_always_true_enforcements = True
         self._exit_on_solver_result_unknown = True
         self._tag_data_with_position = False
@@ -1112,7 +1108,7 @@ class SymEnvironment:
         self._max_tx_size = 1000000
         self._max_num_inputs = 24386
         self._max_num_outputs = self._max_tx_size // (9+1+33+33)
-        self._plugins: set[str] = set()
+        self._plugins: list[str] = []
 
         self._sym_ec_mul_scalar_fun: Optional['z3.Function'] = None
         self._sym_ec_tweak_add_fun: Optional['z3.Function'] = None
@@ -1121,7 +1117,7 @@ class SymEnvironment:
         self._sym_hashfun: dict[str, 'z3.FuncDeclRef'] = {}
         self._sym_bitfun8: dict[str, 'z3.FuncDeclRef'] = {}
         self._z3_tracked_assertion_lines: dict[str, int] = {}
-        self._plugin_modules: set[types.ModuleType] = set()
+        self._plugin_modules: list[types.ModuleType] = []
         self._plugin_module_state: dict[str, dict[str, Any]] = {}
 
         self.tracked_failure_codes: dict[str, int] = {}
@@ -1544,7 +1540,7 @@ class SymEnvironment:
                 self._plugin_module_state[plugin_name] = \
                     plugin_module.init(sys.modules[__name__], self)
 
-            self._plugin_modules.add(plugin_module)
+            self._plugin_modules.append(plugin_module)
 
     def z3_tracked_assertion_line_usagenum(self, lineno_str: str) -> int:
         usageno = self._z3_tracked_assertion_lines.get(lineno_str, 0)
@@ -10019,7 +10015,7 @@ def usage() -> None:
                 dfl_v = getattr(dfl_env, key)
                 if isinstance(dfl_v, bool):
                     return 'true' if dfl_v else 'false'
-                elif isinstance(dfl_v, set):
+                elif isinstance(dfl_v, list):
                     return f"'{','.join(dfl_v)}'"
                 elif isinstance(dfl_v, tuple):
                     return f"'{' '.join(str(elt) for elt in dfl_v)}'"
@@ -10094,7 +10090,7 @@ def parse_cmdline_args(args: Iterable[str]) -> None:  # noqa
                 sys.stderr.write(
                     f"Setting \"--{argname}\" can be only 'true' or 'false'\n")
                 sys.exit(-1)
-        elif isinstance(cur_v, set):
+        elif isinstance(cur_v, list):
             member_values: list[str] = []
             for mstr in value_str.split(','):
                 mstr = mstr.strip()
