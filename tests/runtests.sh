@@ -2,6 +2,7 @@
 
 set -ex
 
+./test_size_reports.sh
 ./test_plugins.sh
 ./test_integer_conversion.py
 ./test_data_placeholders.py

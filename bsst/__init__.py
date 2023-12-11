@@ -391,6 +391,29 @@ class SymEnvironment:
         self._produce_model_values_for.update(result_dict)
 
     @property
+    def sort_model_values(self) -> str:
+        """When more than one sample is generated for model values, they can
+        be sorted by their byte size: in ascending order if this setting
+        is set to 'asc' or 'size_asc', and in descending order if this setting
+        is set to 'desc' or 'size_desc'. For 'asc' and 'desc', the sorting
+        will be done by the value itself. For 'size_asc' and 'size_desc',
+        the sorting will be done by the byte size of the value, and after that,
+        by the value itself.
+
+        When set to 'no', model values will not be sorted
+        """
+        return self._sort_model_values
+
+    @sort_model_values.setter
+    def sort_model_values(self, value: str) -> None:
+        if value not in ('no', 'asc', 'desc', 'size_asc', 'size_desc'):
+            raise ValueError(
+                "Only 'asc', 'desc', 'size_asc', size_desc', "
+                "or 'no' are allowed as sorting mode for model values")
+
+        self._sort_model_values = value
+
+    @property
     def report_model_value_sizes(self) -> bool:
         """Add information about byte size of produced model values in the report
         """
@@ -1125,6 +1148,7 @@ class SymEnvironment:
         self._produce_model_values = True
         self._produce_model_values_for: dict[str, int] = {}  # expected empty (updated when set)
         self._report_model_value_sizes = False
+        self._sort_model_values = 'no'
         self._check_always_true_enforcements = True
         self._exit_on_solver_result_unknown = True
         self._tag_data_with_position = False
@@ -5678,13 +5702,13 @@ class SymData:
                 cv_check = cv_check.clone()
 
             if count > 1:
-                env.write(f'up to {count} samples for {self} ')
+                env.solving_log(f'up to {count} samples for {self} ')
             else:
-                env.write(f'1 sample for {self} ')
+                env.solving_log(f'1 sample for {self} ')
 
             env.elapsed_time_track_start_time = time.monotonic()
 
-            if self.was_used_as_Int:
+            if self.was_used_as_Int and env.minimaldata_flag:
                 max_scriptnum_size, _ = self._get_used_as_Int_maxsize()
                 known_int_values = list(mv.values_as_scriptnum_int(max_size=max_scriptnum_size))
                 diff_count = count - len(known_int_values) + 1
@@ -5714,8 +5738,13 @@ class SymData:
                 # If constrained values are set, model values must match
                 if cv_check:
                     cv_check.set_possible_values(*known_Int64_values)
-            elif self.was_used_as_ByteSeq:
-                known_byte_values = list(mv.values_as_bytes())
+            else:
+                self.use_as_ByteSeq()
+                if env.minimaldata_flag:
+                    known_byte_values = list(mv.values_as_bytes())
+                else:
+                    known_byte_values = []
+
                 diff_count = count - len(known_byte_values) + 1
                 if diff_count > 0:
                     known_byte_values.extend(
@@ -5728,11 +5757,9 @@ class SymData:
                 # If constrained values are set, model values must match
                 if cv_check:
                     cv_check.set_possible_values(*known_byte_values)
-            else:
-                pass
 
             maybe_report_elapsed_time()
-            env.ensure_newline()
+            env.solving_log_ensure_newline()
 
     @property
     def known_bool_value(self) -> bool | None:
@@ -9326,6 +9353,14 @@ def report() -> None:  # noqa
 
             if env.produce_model_values:
                 def get_val_str(prefix: str, sd: SymData) -> str:
+                    def vrepr(v: T_ConstrainedValueValue) -> str:
+                        if not env.minimaldata_flag and isinstance(v, bytes) and \
+                                sd.was_used_as_Int:
+                            vi = scriptnum_to_integer(v, max_size=len(v))
+                            return f'{vi} <encoded: {value_common_repr(v)}>'
+
+                        return value_common_repr(v)
+
                     if cv := sd.get_model_value():
                         num_samples = sd.num_model_value_samples
                     else:
@@ -9339,7 +9374,7 @@ def report() -> None:  # noqa
                     shown_sizes: set[int] = set()
 
                     if cv.single_value is not None:
-                        result.append(f'{prefix} = {cv}')
+                        result.append(f'{prefix} = {vrepr(cv.single_value)}')
                         shown_sizes.add(len(cv.as_bytes()))
                         got_more_sizes = False
                     else:
@@ -9351,6 +9386,21 @@ def report() -> None:  # noqa
                         vals = list(distinct_size_values.values()) + \
                             list(set(cv.possible_values) - set(distinct_size_values.values()))
 
+                        if env.sort_model_values != 'no':
+                            if env.sort_model_values.startswith('size_'):
+                                vals.sort(key=lambda v: ((len(v) if isinstance(v, bytes)
+                                                          else (len(v.encode('utf-8'))
+                                                                if isinstance(v, str)
+                                                                else len(integer_to_scriptnum(v)))),
+                                                         v))
+                            else:
+                                vals.sort()
+
+                            if env.sort_model_values.endswith('desc'):
+                                vals.reverse()
+                            else:
+                                assert env.sort_model_values.endswith('asc')
+
                         assert len(vals) == len(cv.possible_values)
 
                         for i, v in enumerate(vals):
@@ -9361,10 +9411,10 @@ def report() -> None:  # noqa
                                 break
 
                             if i == 0:
-                                result.append(f'{prefix} : {value_common_repr(v)}')
+                                result.append(f'{prefix} : {vrepr(v)}')
                             else:
                                 result.append(
-                                    f'{" "*len(prefix)} : {value_common_repr(v)}')
+                                    f'{" "*len(prefix)} : {vrepr(v)}')
 
                             shown_sizes.add(len(ConstrainedValue.convert_to_bytes(v)))
                         else:
@@ -10296,7 +10346,7 @@ def parse_cmdline_args(args: Iterable[str]) -> None:  # noqa
 
     for arg in args:
         if not arg.startswith('--'):
-            sys.stderr.write("options should start with \"--\"\n")
+            sys.stderr.write("options and settings should start with \"--\"\n")
             sys.exit(-1)
 
         if arg == '--help':

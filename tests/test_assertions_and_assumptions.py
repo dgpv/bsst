@@ -47,7 +47,7 @@ testcases_normal: list[tuple[str, set[int | bytes]]] = [
     ),
     (
         # NOTE: 0x00 must be ignored because it is not valid scriptnum,
-        # and we have scriptnums for assume($a), and minimaldat_flag is False
+        # and we have scriptnums for assume($a), and minimaldata_flag is False
         """
         // bsst-assume($a): >-3 0x00
         // bsst-assume($a): <2
