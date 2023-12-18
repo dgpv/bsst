@@ -34,17 +34,19 @@ All valid paths:
 
         WITHIN(wit0, 1, 3) @ END
 
-===================================================
-Witness usage and model values for all valid paths:
-===================================================
+===============================
+Witness usage and model values:
+===============================
+
+All valid paths:
+----------------
 Witnesses used: 1
 
 Model values:
         wit0 : 2
              : 1
              : ---
-        SIZE: 1
-        
+        # SIZE: 1
 
 END
 
@@ -71,9 +73,12 @@ All valid paths:
         NOT(wit0) @ 3:L1
         WITHIN(SIZE(wit0), 1, 3) @ END
 
-===================================================
-Witness usage and model values for all valid paths:
-===================================================
+===============================
+Witness usage and model values:
+===============================
+
+All valid paths:
+----------------
 Witnesses used: 1
 
 Model values:
@@ -82,8 +87,7 @@ Model values:
              : 0 <encoded: x('0000')>
              : 0 <encoded: x('0080')>
              : ---
-        SIZES: 1, 2
-        
+        # SIZES: 1, 2
 
 END
 
@@ -110,17 +114,19 @@ All valid paths:
         NOT(wit0) @ 3:L1
         WITHIN(SIZE(wit0), 1, 3) @ END
 
-===================================================
-Witness usage and model values for all valid paths:
-===================================================
+===============================
+Witness usage and model values:
+===============================
+
+All valid paths:
+----------------
 Witnesses used: 1
 
 Model values:
         wit0 : 0 <encoded: x('00')>
              : 0 <encoded: x('80')>
              : ...
-        SIZES: 1, ...
-        
+        # SIZES: 1, ...
 
 END
 

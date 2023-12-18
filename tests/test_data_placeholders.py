@@ -33,13 +33,16 @@ All valid paths:
 
         <*> EQUAL(ADD($a, 1), SUB(ADD($a, 2), 1)) @ END
 
-==================================
-Witness usage for all valid paths:
-==================================
+=================================
+Witness usage and stack contents:
+=================================
+
+All valid paths:
+----------------
 Witnesses used: 0
 
 Stack values:
-        <result> = EQUAL(ADD($a, 1), SUB(ADD($a, 2), 1)) : ?
+        <result> = EQUAL(ADD($a, 1), SUB(ADD($a, 2), 1)) : one_of(0, 1)
 
 """
 

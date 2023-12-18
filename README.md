@@ -95,6 +95,8 @@ an apostrophe <<'>> will be appended to the identifier with different value.
 
 The data reference identifiers will be prepended with `&` in the report
 
+Note that when enforcement constraints that are structurally equal in a sub-paths are "moved up" the execution path hierarchy in the report, such "enforcements" in different sub-paths, while structurally equal, may contain data refereces that are different between them. When such "enforcements" are "combined", the reported combined enforcement constraint will show these data references in a curly braces, separated by `;`. For example, `&{a}` would mean that one "enforcement" had data refrerence `a` at particular place, while other did not; `&{a;b}` would mean that one "enforcement" had data reference `a` and another had data reference `b` in the same place.
+
 ### Assertions
 
 Specially-formatted comments can be used to put constraints on value on top of the stack: `// bsst-assert:` and `// bsst-assert-size:`. The difference is that the former puts constraints on the value itself, while the latter constraints the

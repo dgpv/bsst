@@ -2,6 +2,8 @@
 
 set -ex
 
+export IS_BSST_TESTS_IS_IN_PROGRESS=1
+
 ./test_size_reports.sh
 ./test_plugins.sh
 ./test_integer_conversion.py

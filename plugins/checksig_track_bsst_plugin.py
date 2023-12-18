@@ -18,21 +18,22 @@ def pre_finalize(env: 'bsst.SymEnvironment', ctx: 'bsst.ExecContext',
                         'Z3 is not enabled')
         return
 
-    for pc, op, r in ctx.sig_check_operations:
-        if op in (bsst.OP_CHECKSIGVERIFY, bsst.OP_CHECKMULTISIGVERIFY):
+    for cso in ctx.sig_check_operations:
+        if cso.op in (bsst.OP_CHECKSIGVERIFY, bsst.OP_CHECKMULTISIGVERIFY):
             checksig_results.append(1)
-        elif op in (bsst.OP_CHECKSIG, bsst.OP_CHECKMULTISIG):
-            checksig_results.append(r.as_Int())
-        elif op == bsst.OP_CHECKSIGADD:
-            checksig_results.append(r.as_Int() - r.args[1].as_Int())
-        elif op in (bsst.OP_CHECKSIGFROMSTACK,
-                    bsst.OP_CHECKSIGFROMSTACKVERIFY):
+        elif cso.op in (bsst.OP_CHECKSIG, bsst.OP_CHECKMULTISIG):
+            checksig_results.append(cso.result.as_Int())
+        elif cso.op == bsst.OP_CHECKSIGADD:
+            checksig_results.append(cso.result.as_Int() -
+                                    cso.result.args[1].as_Int())
+        elif cso.op in (bsst.OP_CHECKSIGFROMSTACK,
+                        bsst.OP_CHECKSIGFROMSTACKVERIFY):
             pass
         else:
             ctx.add_warning(
-                f'opcode {op} at {bsst.op_pos_info(pc)} performs signature '
-                f'check, but is not supported by {bsst.cur_plugin_name()}'
-                f'plugin')
+                f'opcode {cso.op} at {bsst.op_pos_info(cso.pc)} performs '
+                f'signature check, but is not supported by '
+                f'{bsst.cur_plugin_name()} plugin')
 
     accum: Union[int, 'z3.ExprRef'] = 0
     for res in checksig_results:

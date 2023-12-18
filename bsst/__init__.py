@@ -112,7 +112,7 @@ import importlib
 import importlib.util
 import multiprocessing
 
-from typing import TextIO, Mapping
+from typing import TextIO, Mapping, NamedTuple
 from multiprocessing.pool import AsyncResult
 from copy import deepcopy
 from dataclasses import dataclass
@@ -1205,6 +1205,7 @@ class SymEnvironment:
         self.dummyexpr_counter = 0
         self.stack_symdata_index: int | None = None
         self.data_placeholders: dict[str, 'SymData'] = {}
+        self.data_references: dict[str, tuple[str, 'ExecContext']] = {}
         self.elapsed_time_track_start_time = 0.0
 
         self._root_branch: Optional['Branchpoint'] = None
@@ -1705,6 +1706,8 @@ class SymEnvironment:
 
 MANUAL_TRACKED_ASSERTION_PREFIX = '_line_'
 TOTAL_TRACKED_ASSERTION_PREFIX = '_tracked_'
+NUM_WITNESSES_SPECIAL_MVNAME = '<NUM_WITNESSES>'
+SCRIPT_RESULT_SPECIAL_MVNAME = '<result>'
 
 POSSIBLE_TX_VERSIONS = (0, 1, 2)
 
@@ -1802,8 +1805,9 @@ g_current_exec_context: Optional['ExecContext'] = None
 g_current_op: Optional['OpCode'] = None
 g_skip_assertion_for_enforcement_condition: Optional[tuple['SymData', int]] = None
 g_mode_tags_for_opcodes: Optional[tuple[str, ...]] = None
-g_data_reference_names_table: dict[str, dict[str, tuple['SymData', 'ExecContext']]] = {}
-g_seen_named_values: set[str] = set()
+g_data_references_to_ignore: set[str] = set()
+g_seen_data_references: set[str] = set()
+g_data_reference_aliases: dict[str, list[str]] = {}
 g_current_plugin_name: str | None = None
 
 
@@ -1906,28 +1910,18 @@ class DummyExpr:
 
 
 @contextmanager
-def VarnamesDisplay(show_assignments: bool = False
-                    ) -> Generator[None, None, None]:
+def VarnamesDisplay() -> Generator[None, None, None]:
     global g_do_process_data_reference_names
 
     assert not g_do_process_data_reference_names, \
         "no recursive calls to VarnamesDisplay"
 
     g_do_process_data_reference_names = True
-    g_data_reference_names_table.clear()
-
-    env = cur_env()
 
     try:
         yield
-        if g_data_reference_names_table and show_assignments:
-            env.ensure_empty_line()
-            env.write_line('Data references:')
-            env.write_line('----------------')
-            data_reference_names_show()
     finally:
         g_do_process_data_reference_names = False
-        g_data_reference_names_table.clear()
 
 
 class FailureCodeDispatcher:
@@ -1999,6 +1993,8 @@ def parse_failcodes(errstr: str) -> list[tuple[str, int]]:
     assert errstr.startswith(SCRIPT_FAILURE_PREFIX_SOLVER)
     info_set: set[tuple[str, int]] = set()
     plen = len(SCRIPT_FAILURE_PREFIX_SOLVER)
+    env = cur_env()
+
     for code in errstr[plen:].split(','):
         code = code.strip()
         if not code:
@@ -2011,13 +2007,13 @@ def parse_failcodes(errstr: str) -> list[tuple[str, int]]:
             else:
                 assert code.startswith(
                     f'check_{MANUAL_TRACKED_ASSERTION_PREFIX}_')
-                if cur_env().z3_debug:
+                if env.z3_debug:
                     info_set.add((code, 0))
         else:
             lpos = code[atpos+1:].find('L')
             if lpos < 0:
                 assert code[atpos+1:atpos+5] in ('END', 'END~')
-                pc = len(cur_env().script_info.body)
+                pc = len(env.script_info.body)
             else:
                 pc = int(code[atpos+1:atpos+1+lpos])
 
@@ -3751,7 +3747,7 @@ class BsstAssertion:
     is_for_size: bool
     line_no: int
     text: str
-    dref_name: str
+    dref: str
 
 
 @dataclass
@@ -3832,11 +3828,8 @@ def scriptnum_to_integer(v: bytes, max_size: int = SCRIPTNUM_DEFAULT_SIZE
             # is +-255, which encode to 0xff00 and 0xff80 respectively.
             # (big-endian).
             if len(v) <= 1 or (v[len(v) - 2] & 0x80) == 0:
-                msg = "non-minimally encoded script number"
                 if cur_env().minimaldata_flag:
-                    raise ScriptFailure(msg)
-                else:
-                    cur_context().add_warning(msg)
+                    raise ScriptFailure("non-minimally encoded script number")
 
     result = 0
     if len(v):
@@ -3854,8 +3847,6 @@ class Branchpoint:
 
     _branches: tuple['Branchpoint', ...] = ()
     context: Optional['ExecContext']
-    unique_enforcements: set['Enforcement'] | None = None
-    seen_enforcements: set['Enforcement'] | None = None
 
     def __init__(self, *, pc: int,
                  cond: Optional[Union['SymData', tuple['SymData', ...]]] = None,
@@ -3882,6 +3873,12 @@ class Branchpoint:
                 context.tx = TransactionFieldValues()
 
         self.context = context
+
+        self.model_value_repr_intersection: dict[
+            str, dict[str, ModelValueInfo]
+        ] = {}
+        self.enforcements_intersection: list['Enforcement'] = []
+        self.seen_enforcement_strings: set[str] = set()
 
     def get_valid_branches(self) -> tuple['Branchpoint', ...]:
         return tuple(b for b in self._branches
@@ -3929,10 +3926,11 @@ class Branchpoint:
     def get_enforcement_path(self, e: "Enforcement") -> tuple['Branchpoint', ...]:
         result: list[Branchpoint] = []
         bp = self
+        e_str = e.to_string(tag_with_position=True, is_canonical=True)
         while bp.parent:
             valid_branches = bp.parent.get_valid_branches()
             if len(valid_branches) > 1:
-                if all(e in (bbp.seen_enforcements or ())
+                if all(e_str in bbp.seen_enforcement_strings
                        for bbp in valid_branches if bbp is not bp):
                     pass
                 else:
@@ -4039,110 +4037,110 @@ class Branchpoint:
 
         return {k: uvdict[k] for k in crset}
 
-    def process_unique_enforcements(self) -> None:
-
-        self._process_unique_enforcements()
-
-        def clean_unique_enforcements(bp: Branchpoint,
-                                      parent_set: set['Enforcement']) -> None:
-            for bbp in bp.get_valid_branches():
-                assert bbp.unique_enforcements is not None
-                bbp.unique_enforcements -= parent_set
-                clean_unique_enforcements(
-                    bbp, bbp.unique_enforcements.union(parent_set))
-
-        assert self.unique_enforcements is not None
-        clean_unique_enforcements(self, self.unique_enforcements)
-
-    def _process_unique_enforcements(  # noqa
-        self
-    ) -> Optional[tuple[set['Enforcement'], set['Enforcement']]]:
+    def process_child_data_intersections(self) -> None:  # noqa
 
         if self.context:
             assert not self.context.failure
-            eset = set(self.context.enforcements)
-            self.seen_enforcements = eset.copy()
-            self.unique_enforcements = eset.copy()
-            return eset, eset.copy()
+            self.seen_enforcement_strings = set(
+                e.to_string(tag_with_position=True, is_canonical=True)
+                for e in self.context.enforcements
+            )
+            self.enforcements_intersection = self.context.enforcements.copy()
+            self.model_value_repr_intersection = \
+                deepcopy(self.context.model_value_repr_dict)
+            return
 
         assert self._branches
 
         valid_branches = self.get_valid_branches()
 
-        enfsets: list[
-            tuple['Branchpoint',
-                  tuple[set['Enforcement'], set['Enforcement']]]]
+        if not valid_branches:
+            return
 
-        enfsets = []
         for bp in valid_branches:
             with CurrentExecContext(bp.context):
-                if es_pair := bp._process_unique_enforcements():
-                    enfsets.append((bp, es_pair))
+                bp.process_child_data_intersections()
 
-        if not enfsets:
-            self.seen_enforcements = set()
-            self.unique_enforcements = set()
-            return None
+        possible_aliases: list[tuple[Enforcement, Enforcement]] = []
+        common_enf_difference: set[Enforcement] = set()
+        seen_enforcements_set = valid_branches[0].seen_enforcement_strings.copy()
+        common_enforcements = valid_branches[0].enforcements_intersection.copy()
+        common_mvr = deepcopy(valid_branches[0].model_value_repr_intersection)
 
-        for bp, es_pair in enfsets:
-            uenf = es_pair[0].copy()
-            for other_bp, other_es_pair in enfsets:
-                if bp != other_bp:
-                    uenf -= other_es_pair[1]
-
-            bp.unique_enforcements = uenf
-
-        and_set = enfsets[0][1][0]
-        or_set = enfsets[0][1][1]
-
-        def recurse_for_aliases(p1: tuple[SymData, ExecContext],
-                                p2: tuple[SymData, ExecContext]) -> None:
-            d1, c1 = p1
-            d2, c2 = p2
-            if d1._data_reference != d2._data_reference:
-                if d1._data_reference is None:
-                    d1._data_reference = d2._data_reference
-                elif d2._data_reference is None:
-                    d2._data_reference = d1._data_reference
+        for bp in valid_branches[1:]:
+            seen_enforcements_set.update(bp.seen_enforcement_strings)
+            for e1 in common_enforcements:
+                for e2 in bp.enforcements_intersection:
+                    if e1 == e2:
+                        assert e1 is not e2, \
+                            ("e1 and e2 come from different branches, "
+                                "can be equal, but cannot be identical")
+                        possible_aliases.append((e1, e2))
+                        break
                 else:
-                    d2._data_reference_aliases.add(d1._data_reference)
-                    d1._data_reference_aliases.add(d2._data_reference)
+                    common_enf_difference.add(e1)
 
-            assert len(d1._args) == len(d2._args)
-            for idx in range(len(d1._args)):
-                s_arg = d1._args[idx]
-                t_arg = d2._args[idx]
+            for name, mvrdict in common_mvr.items():
+                bp_mvrdict = bp.model_value_repr_intersection.get(name, {})
+                for mvrtype in model_value_info_types:
+                    if mvrdict.get(mvrtype) != bp_mvrdict.get(mvrtype):
+                        mvrdict.pop(mvrtype, None)
 
-                with CurrentExecContext(c1):
-                    s_cr = s_arg.canonical_repr()
-                with CurrentExecContext(c2):
-                    t_cr = t_arg.canonical_repr()
-                assert s_cr == t_cr
+            common_mvr = {
+                name: mvrdict for name, mvrdict in common_mvr.items()
+                if any(mvrdict.values())
+            }
 
-                recurse_for_aliases((s_arg, c1), (t_arg, c2))
+        common_enforcements = [e for e in common_enforcements
+                               if e not in common_enf_difference]
 
-        for _, (a_s, o_s) in enfsets[1:]:
-            for e1 in a_s:
-                for e2 in and_set:
-                    if e1 == e2:
-                        recurse_for_aliases((e1.cond, e1.context),
-                                            (e2.cond, e2.context))
+        for e1, e2 in possible_aliases:
+            if e1 in common_enforcements:
+                e1.add_dataref_aliases(e2)
 
-            for e1 in o_s:
-                for e2 in or_set:
-                    if e1 == e2:
-                        recurse_for_aliases((e1.cond, e1.context),
-                                            (e2.cond, e2.context))
+        for bp in valid_branches:
+            bp.enforcements_intersection = [
+                e for e in bp.enforcements_intersection
+                if e not in common_enforcements
+            ]
+            for name, mvrdict in common_mvr.items():
+                bp_mvrdict = bp.model_value_repr_intersection.get(name, {})
+                common_value = mvrdict.get(MVINFO_TYPE_VALUE)
+                bp_value = bp_mvrdict.get(MVINFO_TYPE_VALUE)
+                common_datarefs = mvrdict.get(MVINFO_TYPE_DATAREF)
+                bp_daterefs = bp_mvrdict.get(MVINFO_TYPE_DATAREF)
+                if common_value != bp_value or common_datarefs != bp_daterefs:
+                    # if main value lines or dataref lines are not common,
+                    # leave sizes, etc. in the child bp too
+                    pass
+                else:
+                    for mvrtype in model_value_info_types:
+                        if mvrdict.get(mvrtype) == bp_mvrdict.get(mvrtype):
+                            bp_mvrdict.pop(mvrtype, None)
 
-            and_set &= a_s
-            or_set |= o_s
+                    if not bp_mvrdict.values():
+                        bp.model_value_repr_intersection.pop(name, None)
 
-        self.seen_enforcements = or_set.copy()
+        self.seen_enforcement_strings = seen_enforcements_set
+        self.model_value_repr_intersection = common_mvr
 
-        if self.parent is None:
-            self.unique_enforcements = and_set.copy()
+        # when tag_enforcements_with_position is false,
+        # common_enforcements might contain duplicates even now
+        self.enforcements_intersection = []
+        for e1 in common_enforcements:
+            for e2 in self.enforcements_intersection:
+                if e1 == e2:
+                    assert e1 is not e2, \
+                        ("e1 and e2 come from different places, "
+                         "can be equal, but cannot be identical")
+                    e2.add_dataref_aliases(e1)
+                    break
+            else:
+                self.enforcements_intersection.append(e1)
 
-        return and_set, or_set
+    @classmethod
+    def tuple_for_sort(cls, bp: 'Branchpoint') -> tuple[int, ...]:
+        return (len(bp.get_path()), bp.pc, bp.branch_index)
 
     def __str__(self) -> str:
         return f'branch @ {self.pc} : {self.designation}'
@@ -4153,6 +4151,157 @@ class Branchpoint:
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, self.__class__)
         return str(self) == str(other)
+
+
+MVINFO_TYPE_VALUE = 'VALUE'
+MVINFO_TYPE_SIZE = 'SIZE'
+MVINFO_TYPE_DATAREF = 'DATAREF'
+
+model_value_info_default_types: tuple[str, ...] = (
+    MVINFO_TYPE_VALUE, MVINFO_TYPE_SIZE, MVINFO_TYPE_DATAREF
+)
+
+model_value_info_types: tuple[str, ...] = model_value_info_default_types
+
+
+def register_model_value_info_type(name: str) -> str:
+    global model_value_info_types
+
+    if g_current_plugin_name:
+        name = f'plugin-{g_current_plugin_name}:{name}'
+
+    if name in model_value_info_types:
+        raise ValueError('value info type name was already registered')
+
+    model_value_info_types = tuple(list(model_value_info_types) + [name])
+
+    return name
+
+
+class ModelValueInfo:
+
+    def __init__(self, *, value_lines: Iterable[str] = (),
+                 got_more_values: bool = True) -> None:
+        self.value_lines: list[str] = list(value_lines)
+        self.got_more_values = got_more_values
+        self.separator = ':'
+
+    @classmethod
+    def from_symdata(cls, sd: 'SymData', ctx: 'ExecContext',  # noqa
+                     ) -> dict[str, 'ModelValueInfo']:
+
+        env = cur_env()
+
+        mv: Optional[ConstrainedValue]
+
+        mvr_v = cls()
+        mvr_s = cls()
+        mvr_dr: Optional[ModelValueInfo] = None
+
+        result = {}
+        if dref_names := ctx.get_global_datarefs_for(sd):
+            mvr_dr = cls()
+            mvr_dr.got_more_values = False
+            mvr_dr.value_lines.extend(sorted(dref_names))
+            result[MVINFO_TYPE_DATAREF] = mvr_dr
+
+        if model_value := sd.get_model_value():
+            mv = model_value
+        else:
+            mv = sd.get_constrained_value()
+            if not mv:
+                mvr_v.value_lines.append('?')
+                result[MVINFO_TYPE_VALUE] = mvr_v
+                return result
+
+        def vrepr(v: T_ConstrainedValueValue) -> str:
+            if not env.minimaldata_flag and isinstance(v, bytes) and \
+                    sd.was_used_as_Int:
+                vi = scriptnum_to_integer(v, max_size=len(v))
+                return f'{vi} <encoded: {value_common_repr(v)}>'
+
+            return value_common_repr(v)
+
+        shown_sizes: set[int] = set()
+
+        distinct_size_values = {
+            len(mv.convert_to_bytes(v)): mv.possible_values[i]
+            for i, v in enumerate(mv.possible_values)
+        }
+
+        mvr_s.got_more_values = False
+
+        if mv.single_value:
+            mvr_v.value_lines.append(vrepr(mv.single_value))
+            mvr_v.got_more_values = False
+            mvr_v.separator = '='
+            shown_sizes.add(len(mv.as_bytes()))
+        elif not model_value:
+            mvr_v.value_lines.append(repr(mv))
+            mvr_v.got_more_values = False
+            # distinct_size_values will be empty if cv.possible_values is empty
+            if mv.possible_values:
+                shown_sizes.update(distinct_size_values)
+            else:
+                shown_sizes.update(set(mv.possible_sizes))
+        else:
+            vals = list(distinct_size_values.values()) + \
+                list(set(mv.possible_values) - set(distinct_size_values.values()))
+
+            if env.sort_model_values != 'no':
+                if env.sort_model_values.startswith('size_'):
+                    vals.sort(key=lambda v: ((len(v) if isinstance(v, bytes)
+                                              else (len(v.encode('utf-8'))
+                                                    if isinstance(v, str)
+                                                    else len(integer_to_scriptnum(v)))),
+                                             v))
+                else:
+                    vals.sort()
+
+                if env.sort_model_values.endswith('desc'):
+                    vals.reverse()
+                else:
+                    assert env.sort_model_values.endswith('asc')
+
+            assert len(vals) == len(mv.possible_values)
+
+            for i, v in enumerate(vals):
+                if i >= sd.num_model_value_samples:
+                    break
+
+                mvr_v.value_lines.append(vrepr(v))
+                shown_sizes.add(len(ConstrainedValue.convert_to_bytes(v)))
+            else:
+                mvr_v.got_more_values = False
+
+        mvr_s.value_lines = [str(sz) for sz in sorted(shown_sizes)]
+        mvr_s.got_more_values = len(shown_sizes) != len(distinct_size_values.keys())
+
+        assert mvr_v.value_lines, "at least one value line is expected"
+        assert mvr_s.value_lines, "at least one size line is expected"
+
+        result[MVINFO_TYPE_VALUE] = mvr_v
+        if env.report_model_value_sizes:
+            result[MVINFO_TYPE_SIZE] = mvr_s
+
+        return result
+
+    def __hash__(self) -> int:
+        if self.got_more_values:
+            return hash(self)
+
+        return hash(tuple(self.value_lines))
+
+    def __eq__(self, other: Optional[object]) -> bool:
+        if other is None:
+            return False
+
+        assert isinstance(other, self.__class__)
+
+        if self.got_more_values or other.got_more_values:
+            return False
+
+        return self.value_lines == other.value_lines
 
 
 class Enforcement:
@@ -4167,20 +4316,54 @@ class Enforcement:
         self.is_script_bool = is_script_bool
         self.is_always_true_in_path = False
         self.is_always_true_global = False
+        self._data_reference_aliases: dict[str, list[str]] = {}
 
     def clone(self, *, context: 'ExecContext') -> 'Enforcement':
         return Enforcement(self.cond, pc=self.pc, context=context,
                            name=self.name, is_script_bool=self.is_script_bool)
 
-    def _str_informative(self, is_canonical: bool = False) -> str:
+    def add_dataref_aliases(self, other: 'Enforcement') -> None:
+
+        def recurse_for_aliases(d1: SymData, d2: SymData) -> None:
+            if d1 == d2:
+                return
+
+            if d1._data_reference != d2._data_reference:
+                aliases = self._data_reference_aliases.get(d1.unique_name, [])
+
+                if d1._data_reference and d1._data_reference not in aliases:
+                    aliases.append(d1._data_reference)
+
+                if d2._data_reference and d2._data_reference not in aliases:
+                    aliases.append(d2._data_reference)
+
+                other_aliases = other._data_reference_aliases.get(d2.unique_name, [])
+                for oa in other_aliases:
+                    if oa not in aliases:
+                        aliases.append(oa)
+
+                self._data_reference_aliases[d1.unique_name] = aliases
+
+            assert len(d1._args) == len(d2._args)
+            for idx in range(len(d1._args)):
+                recurse_for_aliases(d1._args[idx], d2._args[idx])
+
+        recurse_for_aliases(self.cond, other.cond)
+
+    def to_string(self, *, is_canonical: bool, tag_with_position: bool) -> str:
         # NOTE: when is_canonical=True, this should give
         # 'canonical representation', so the 'informational decorations'
         # for the returned text must be stable for each run of the program
         with CurrentExecContext(self.context):
-            if is_canonical:
-                reprtext = self.cond.canonical_repr()
-            else:
-                reprtext = self.cond.readable_repr(with_name=self.name)
+            g_data_reference_aliases.clear()
+            g_data_reference_aliases.update(self._data_reference_aliases.copy())
+            try:
+                if is_canonical:
+                    reprtext = self.cond.canonical_repr()
+                else:
+                    reprtext = self.cond.readable_repr(with_name=self.name)
+            finally:
+                g_data_reference_aliases.clear()
 
             is_obvious_bool = False
             if cv := self.cond.get_constrained_value():
@@ -4191,7 +4374,7 @@ class Enforcement:
                 reprtext = f'BOOL({reprtext})'
 
             pos_info_tag = ''
-            if cur_env().tag_enforcements_with_position:
+            if tag_with_position:
                 pos_info_tag = f' @ {op_pos_info(self.pc)}'
 
             alwt_sign = ''
@@ -4204,10 +4387,14 @@ class Enforcement:
             return f'{alwt_sign}{reprtext}{pos_info_tag}'
 
     def __repr__(self) -> str:
-        return self._str_informative()
+        return self.to_string(
+            is_canonical=False,
+            tag_with_position=cur_env().tag_enforcements_with_position)
 
     def __str__(self) -> str:
-        return self._str_informative(is_canonical=True)
+        return self.to_string(
+            is_canonical=True,
+            tag_with_position=cur_env().tag_enforcements_with_position)
 
     def __hash__(self) -> int:
         return hash(str(self))
@@ -4711,6 +4898,27 @@ class ExecState:
         return "\n\n".join(parts)
 
 
+CheckSigOperationInfo = NamedTuple(
+    'CheckSigOperationInfo', [
+        ('pc', int),
+        ('op', 'OpCode'),
+        ('result', 'SymData'),
+        ('signatures', tuple['SymData', ...]),
+        ('pubkeys', tuple['SymData', ...]),
+        ('data', Optional['SymData'])
+    ]
+)
+
+HashOperationInfo = NamedTuple(
+    'HashOperationInfo', [
+        ('pc', int),
+        ('op', 'OpCode'),
+        ('result', 'SymData'),
+        ('data', 'SymData')
+    ]
+)
+
+
 T_ExecContext = TypeVar('T_ExecContext', bound='ExecContext')
 
 
@@ -4739,7 +4947,6 @@ class ExecContext(SupportsFailureCodeCallbacks):
         exec_state_log: Optional[dict[int, ExecState]] = None,
         enforcements: Optional[list[Enforcement]] = None,
         constrained_values: Optional[dict[str, ConstrainedValue]] = None,
-        model_values: Optional[dict[str, ConstrainedValue]] = None,
         known_bool_values: Optional[dict[str, bool]] = None,
         used_witnesses: Optional[list['SymData']] = None,
         sym_depth_register: Optional[list['SymDepth']] = None,
@@ -4752,26 +4959,32 @@ class ExecContext(SupportsFailureCodeCallbacks):
         self.exec_state_log = exec_state_log or {}
         self.enforcements = enforcements or []
         self.constrained_values = constrained_values or {}
-        self.model_values = model_values or {}
         self.known_bool_values = known_bool_values or {}
         self.used_witnesses = used_witnesses or []
         self.sym_depth_register = sym_depth_register or []
         self.warnings = warnings or []
         self.z3_warning_vars = z3_warning_vars or []
         self.z3_used_types_for_vars = z3_used_types_for_vars or {}
-        self._run_on_start = []
-        self._z3_on_start = []
+        self.unused_values = set()
+        self.data_placeholders_with_assumptions_applied = set()
+        self.data_references: dict[str, tuple[str, 'SymData']] = {}
+        self.sig_check_operations: list[CheckSigOperationInfo] = []
+        self.hash_operations: list[HashOperationInfo] = []
+
         self._used_as_Int_maxsize = {}
         self._enforcement_condition_positions = {}
         self._data_refcounts = {}
         self._data_refcount_neighbors = {}
         self._plugin_data: dict[str, dict[str, Any]] = {}
-        self.unused_values = set()
-        self.data_placeholders_with_assumptions_applied = set()
-        self.data_references: dict[str, 'SymData'] = {}
-        self.sig_check_operations: list[tuple[int, 'OpCode', 'SymData']] = []
-        self.hash_operations: list[tuple[int, 'OpCode', 'SymData']] = []
-        self.matched_model_values: list['SymData'] = []
+
+        # Fields below won't be copied on clone()
+        self._run_on_start = []
+        self._z3_on_start = []
+        self.model_values: dict[str, ConstrainedValue] = {}
+        self.model_value_name_dict: dict[str, SymData] = {}
+        self.model_value_repr_dict: dict[
+            str, dict[str, ModelValueInfo]
+        ] = {}
 
     @property
     def stack(self) -> list['SymData']:
@@ -4790,13 +5003,13 @@ class ExecContext(SupportsFailureCodeCallbacks):
 
     def clone(self: T_ExecContext) -> T_ExecContext:
         assert not self.failure
+        assert not self.is_finalized, "finalized context cannot be cloned"
 
         inst = self.__class__(
             branchpoint=self.branchpoint,
             exec_state=self.exec_state.clone(),
             exec_state_log=self.exec_state_log.copy(),
             constrained_values=deepcopy(self.constrained_values),
-            model_values=deepcopy(self.model_values),
             known_bool_values=self.known_bool_values.copy(),
             used_witnesses=self.used_witnesses.copy(),
             sym_depth_register=self.sym_depth_register.copy(),
@@ -4807,23 +5020,28 @@ class ExecContext(SupportsFailureCodeCallbacks):
         with CurrentExecContext(inst):
             inst.tx = self.tx.clone()
 
+        for e in self.enforcements:
+            inst.enforcements.append(e.clone(context=inst))
+
         inst.pc = self.pc
         inst.segwit_mode_op_count = self.segwit_mode_op_count
         inst.failure = self.failure
         inst.is_finalized = self.is_finalized
         inst.max_combined_stack_len = self.max_combined_stack_len
         inst.num_expunged_witnesses = self.num_expunged_witnesses
+        inst.unused_values = self.unused_values.copy()
+        inst.data_placeholders_with_assumptions_applied = \
+            self.data_placeholders_with_assumptions_applied.copy()
+        inst.data_references = self.data_references.copy()
+        inst.sig_check_operations = self.sig_check_operations.copy()
+        inst.hash_operations = self.hash_operations.copy()
+
         inst._used_as_Int_maxsize = self._used_as_Int_maxsize.copy()
         inst._enforcement_condition_positions = \
             deepcopy(self._enforcement_condition_positions)
         inst._data_refcounts = self._data_refcounts.copy()
         inst._data_refcount_neighbors = deepcopy(self._data_refcount_neighbors)
-        inst.unused_values = self.unused_values.copy()
-        inst.data_placeholders_with_assumptions_applied = \
-            self.data_placeholders_with_assumptions_applied.copy()
-
-        for e in self.enforcements:
-            inst.enforcements.append(e.clone(context=inst))
+        inst._plugin_data = deepcopy(self._plugin_data)
 
         return inst
 
@@ -4998,6 +5216,30 @@ class ExecContext(SupportsFailureCodeCallbacks):
     def get_name_suffix(self) -> str:
         return f'@{op_pos_info(self.pc, separator="")}'
 
+    def get_global_datarefs_for(self, sd: 'SymData') -> list[str]:
+        result = []
+
+        for dr_for_global, target in self.data_references.values():
+            if target is sd:
+                result.append(dr_for_global)
+
+        return result
+
+    def get_stack_values_with_names(self) -> list[tuple['SymData', str]]:
+        env = cur_env()
+        with CurrentExecContext(self):
+            result: list[tuple['SymData', str]] = []
+            for i, val in enumerate(reversed(self.stack)):
+                maybe_val = f' = {val}' if val._name else ''
+                if not env.cleanstack_flag or len(self.stack) > 1:
+                    name = f'stack[{-(i+1)}]{maybe_val}'
+                else:
+                    name = f'{SCRIPT_RESULT_SPECIAL_MVNAME}{maybe_val}'
+
+                result.append((val, name))
+
+        return result
+
 
 class IntLE64(bytes):
 
@@ -5023,7 +5265,6 @@ class SymData:
     _args: tuple['SymData', ...] = ()
     _data_reference: str | None = None
     _data_reference_was_reset: bool = False
-    _data_reference_aliases: set[str]
     _unique_name: str
 
     _Int: Optional['z3.ArithRef'] = None
@@ -5052,7 +5293,6 @@ class SymData:
 
         self._name = name
         self._wit_no = witness_number
-        self._data_reference_aliases = set()
 
         env = cur_env()
         ctx = cur_context()
@@ -5111,6 +5351,16 @@ class SymData:
     @property
     def args(self) -> tuple['SymData', ...]:
         return self._args
+
+    def depends_on(self, sd: 'SymData') -> bool:
+        if sd == self:
+            return True
+
+        for arg in self._args:
+            if arg.depends_on(sd):
+                return True
+
+        return False
 
     @property
     def unique_name(self) -> str:
@@ -5198,23 +5448,50 @@ class SymData:
             self.update_solver_for_constrained_value(cv)
 
     def set_data_reference(self, data_reference: str) -> None:
+        if self._data_reference == data_reference:
+            return
+
         ctx = cur_context()
+        env = cur_env()
         if self._data_reference is not None or self._data_reference_was_reset:
             if not self._data_reference_was_reset:
                 ctx.warnings.append(
                     (ctx.pc,
-                     f'Tried to replace data_reference {self._data_reference} with data_reference '
-                     f'{data_reference} at {op_pos_info(ctx.pc)}, data_reference is reset to '
-                     f'empty, to prevent confusion'))
+                     f'Tried to replace data_reference &{self._data_reference} '
+                     f'with data_reference &{data_reference}. '
+                     f'To prevent confusion, &{self._data_reference} '
+                     f'is removed and &{data_reference} is ignored'))
                 self._data_reference_was_reset = True
 
-            self._data_reference = None
+            if self._data_reference is not None:
+                dr_for_global, dref = ctx.data_references[self._data_reference]
+                assert dref is self
+                env.data_references.pop(dr_for_global)
+                ctx.data_references.pop(self._data_reference)
+                self._data_reference = None
         else:
-            self._data_reference = data_reference
+            dr_for_global = data_reference
+            cr = self.canonical_repr()
+            while other_entry := env.data_references.get(dr_for_global):
+                other_name, other_ctx = other_entry
+                with CurrentExecContext(other_ctx):
+                    other_cr = other_ctx.data_references[other_name][1].canonical_repr()
+
+                if other_cr == cr:
+                    # Same structure, and under the same name in
+                    # env.data_references. Can ignore.
+                    break
+
+                dr_for_global = f"{dr_for_global}'"
+            else:
+                env.data_references[dr_for_global] = (data_reference, ctx)
+
+            # Inside the context, data reference name should not change
+            self._data_reference = dr_for_global
             assert data_reference not in ctx.data_references, \
                 ("duplicate data reference names are not allowed, so within "
                  "a single context, data references must be unique")
-            ctx.data_references[data_reference] = self
+            ctx.data_references[data_reference] = (dr_for_global, self)
 
     @property
     def is_static(self) -> bool:
@@ -5259,32 +5536,32 @@ class SymData:
         if not g_do_process_data_reference_names:
             return None
 
-        if self._unique_name in g_seen_named_values:
+        if drefs := g_data_reference_aliases.get(self.unique_name):
+            is_alias = True
+        elif self._data_reference:
+            drefs = [self._data_reference]
+            is_alias = False
+        else:
             return None
 
-        data_reference = self._data_reference
-        if data_reference is None:
+        result: list[str] = []
+        for data_reference in drefs:
+            if data_reference:
+                if data_reference in g_data_references_to_ignore:
+                    return None
+
+                g_seen_data_references.add(data_reference)
+
+            result.append(data_reference)
+
+        if len(result) == 0:
             return None
 
-        cr = self.canonical_repr()
-        for dr in ([data_reference] + list(self._data_reference_aliases)):
-            while True:
-                for other_cr, other_entry in g_data_reference_names_table.items():
-                    if other_cr != cr and dr in other_entry:
-                        dr_altname = f"{dr}'"
-                        if dr == data_reference:
-                            data_reference = dr_altname
+        if not is_alias:
+            assert len(result) == 1
+            return f'&{result[0]}'
 
-                        dr = dr_altname
-                        break
-                else:
-                    break
-
-            entry = g_data_reference_names_table.get(cr, {})
-            entry[dr] = (self, cur_context())
-            g_data_reference_names_table[cr] = entry
-
-        return f'&{data_reference}'
+        return '&{'+f'{";".join(result)}'+'}'
 
     def set_model_value(self, cv: Optional[ConstrainedValue]) -> None:
         if cv is None:
@@ -5708,7 +5985,7 @@ class SymData:
             assert name not in namemap
             namemap[name] = self
 
-    def add_model_value_samples(self, *, name: str = '') -> None:  # noqa
+    def add_model_value_samples(self) -> None:  # noqa
         count = self.num_model_value_samples
         if count == 0:
             return
@@ -6078,11 +6355,11 @@ def apply_bsst_assn(ctx: ExecContext, assn: BsstAssertion | BsstAssumption,
 
     if isinstance(assn, BsstAssumption):
         is_assumption = True
-        dref_name = ''
+        dref_str = ''
     else:
         assert isinstance(assn, BsstAssertion)
         is_assumption = False
-        dref_name = assn.dref_name
+        dref_str = assn.dref
 
     def ign_assertion_warning(cause: str) -> None:
         env.solving_log_ensure_newline()
@@ -6090,28 +6367,28 @@ def apply_bsst_assn(ctx: ExecContext, assn: BsstAssertion | BsstAssumption,
                         f'because {cause}')
         ctx.add_warning(f"Assertion at line {assn.line_no} ignored because {cause}")
 
-    if not top and not dref_name:
+    if not top and not dref_str:
         ign_assertion_warning('stack was empty')
         return
 
-    if dref_name:
-        if dref_name.startswith('&'):
-            if dref_name[1:] not in ctx.data_references:
+    if dref_str:
+        if dref_str.startswith('&'):
+            if dref_str[1:] not in ctx.data_references:
                 ign_assertion_warning('data reference was not found')
                 return
 
-            target = ctx.data_references[dref_name[1:]]
-            target_txt = f'{dref_name} = {target}'
+            dref_name_global, target = ctx.data_references[dref_str[1:]]
+            target_txt = f'&{dref_name_global} = {target}'
         else:
-            m = re.match('wit(\\d+)$', dref_name)
+            m = re.match('wit(\\d+)$', dref_str)
             assert m, 'only witnesses must be without "&" prefix'
             wit_no = int(m.group(1))
             if wit_no >= len(ctx.used_witnesses):
-                ign_assertion_warning(f'witness {dref_name} was not used at this point')
+                ign_assertion_warning(f'witness {dref_str} was not used at this point')
                 return
 
             target = ctx.used_witnesses[wit_no]
-            assert target.name == dref_name
+            assert target.name == dref_str
             target_txt = target.name
 
     else:
@@ -7299,7 +7576,8 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                     Check(z3.ForAll(
                         seq, (sym_fun(seq) == sym_fun(data)) == (seq == data)))
 
-            ctx.hash_operations.append((ctx.pc, op, r))
+            ctx.hash_operations.append(
+                HashOperationInfo(pc=ctx.pc, op=op, result=r, data=vch))
 
             z3check()
 
@@ -7357,7 +7635,10 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
             z3check()
 
-            ctx.sig_check_operations.append((ctx.pc, op, r))
+            ctx.sig_check_operations.append(
+                CheckSigOperationInfo(pc=ctx.pc, op=op, result=r, data=None,
+                                      signatures=(vchSig,),
+                                      pubkeys=(vchPubKey,)))
 
             popstack()
             popstack()
@@ -7393,7 +7674,10 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
             z3check()
 
-            ctx.sig_check_operations.append((ctx.pc, op, r))
+            ctx.sig_check_operations.append(
+                CheckSigOperationInfo(pc=ctx.pc, op=op, result=r, data=None,
+                                      signatures=(vchSig,),
+                                      pubkeys=(vchPubKey,)))
 
             popstack()
             popstack()
@@ -7509,7 +7793,10 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
             z3check()
 
-            ctx.sig_check_operations.append((ctx.pc, op, r))
+            ctx.sig_check_operations.append(
+                CheckSigOperationInfo(pc=ctx.pc, op=op, result=r, data=None,
+                                      signatures=tuple(signatures),
+                                      pubkeys=tuple(pubkeys)))
 
             popstack()
             for _ in pubkeys:
@@ -7610,7 +7897,11 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
             z3check()
 
-            ctx.sig_check_operations.append((ctx.pc, op, r))
+            ctx.sig_check_operations.append(
+                CheckSigOperationInfo(pc=ctx.pc, op=op, result=r,
+                                      signatures=(vchSig,),
+                                      pubkeys=(vchPubKey,),
+                                      data=vchData))
 
             popstack()
             popstack()
@@ -8877,7 +9168,7 @@ def parse_script_lines(script_lines: Iterable[str],    # noqa
         bsst_comment_text = ''
         bsst_comment_arg = ''
         assn_dph_name = ''
-        assn_dref_name = ''
+        assn_dref = ''
         data_reference = ''
         # remove comments
         comment_pos = line.find(env.comment_marker)
@@ -8930,15 +9221,15 @@ def parse_script_lines(script_lines: Iterable[str],    # noqa
                         if not (bsst_comment_arg.startswith('(')
                                 and bsst_comment_arg.endswith(')')):
                             die('unexpected format for bsst-assert')
-                        assn_dref_name = bsst_comment_arg[1:-1]
-                        if not assn_dref_name.startswith('&'):
-                            if not re.match('wit(\\d+)$', assn_dref_name):
+                        assn_dref = bsst_comment_arg[1:-1]
+                        if not assn_dref.startswith('&'):
+                            if not re.match('wit(\\d+)$', assn_dref):
                                 die('only data references and witnesses are recognized '
                                     'as arguments to bsst-assert, data reference names '
                                     'must be prefixed with "&", and witness names must have '
                                     'format "wit<N>" where N is a number')
                     else:
-                        assn_dref_name = ''
+                        assn_dref = ''
 
                     types_used = types_used_in_assertions[int(is_for_size)]
 
@@ -9033,7 +9324,7 @@ def parse_script_lines(script_lines: Iterable[str],    # noqa
                 vac_funcs.append(BsstAssertion(
                     fun=assn_check_fun, is_for_size=is_for_size,
                     line_no=line_no, text=bsst_comment_text,
-                    dref_name=assn_dref_name))
+                    dref=assn_dref))
                 assertion_positions[op_pos] = vac_funcs
         else:
             types_used_in_assertions[0].clear()
@@ -9129,25 +9420,26 @@ def _finalize(ctx: ExecContext, env: SymEnvironment) -> None:  # noqa
 
     mvdict_req: dict[str, tuple[str, SymDataRType]] = {}
     mvnamemap: dict[str, 'SymData'] = {}
-    processed_mv: list[SymData] = []
+    processed_mv: dict[SymData, str] = {}
     if env.produce_model_values:
         for wit in ctx.used_witnesses:
             assert wit.name
             if num_samples := env.model_values_name_match(wit.name):
                 wit.update_model_values_request_dict(mvdict_req, mvnamemap)
                 wit.num_model_value_samples = num_samples
-                processed_mv.append(wit)
+                processed_mv[wit] = wit.name
 
         for txval in ctx.tx.values():
             assert txval not in processed_mv, \
                 ("only witnesses are processed at this point, tx values"
                     "cannot intersect")
+            assert txval.name
             num_samples = (env.model_values_name_match('tx')
                            or env.model_values_name_match(f'{txval}'))
             if num_samples:
                 txval.update_model_values_request_dict(mvdict_req, mvnamemap)
                 txval.num_model_value_samples = num_samples
-                processed_mv.append(txval)
+                processed_mv[txval] = f'{txval}'
 
         for val in env.data_placeholders.values():
             if val not in processed_mv:
@@ -9155,23 +9447,24 @@ def _finalize(ctx: ExecContext, env: SymEnvironment) -> None:  # noqa
                 if num_samples := env.model_values_name_match(val.name):
                     val.update_model_values_request_dict(mvdict_req, mvnamemap)
                     val.num_model_value_samples = num_samples
-                    processed_mv.append(val)
+                    processed_mv[val] = val.name
 
-        for dref_name, dref in ctx.data_references.items():
+        for dref_name, (dr_for_global, dref) in ctx.data_references.items():
             if dref not in processed_mv:
                 if num_samples := env.model_values_name_match(f'&{dref_name}'):
                     dref.update_model_values_request_dict(mvdict_req, mvnamemap)
                     dref.num_model_value_samples = num_samples
-                    processed_mv.append(dref)
-
-        ctx.matched_model_values = processed_mv.copy()
+                    processed_mv[dref] = f'&{dr_for_global}'
 
         if num_samples := env.model_values_name_match('stack'):
-            for val in ctx.stack:
+            for val, name in ctx.get_stack_values_with_names():
                 if val not in processed_mv:
                     val.update_model_values_request_dict(mvdict_req, mvnamemap)
                     val.num_model_value_samples = num_samples
-                    processed_mv.append(val)
+                    processed_mv[val] = name
+
+        assert len(processed_mv.keys()) == len(set(processed_mv.values())), \
+            "no duplicate names expected"
 
     if env.log_progress:
         print_as_header("Finalizing path", is_solving=True)
@@ -9240,15 +9533,6 @@ def _finalize(ctx: ExecContext, env: SymEnvironment) -> None:  # noqa
                 if is_verify_target:
                     verify_targets.append(e)
 
-        if env.produce_model_values:
-            with IsolatedSolverContext():
-                if env.log_progress and mvdict_req:
-                    print_as_header('Producing model value samples',
-                                    level=2, is_solving=True)
-
-                for val in processed_mv:
-                    val.add_model_value_samples()
-
         if env.check_always_true_enforcements and verify_targets:
             if env.log_progress:
                 print_as_header('Checking for always-true enforcements',
@@ -9267,42 +9551,35 @@ def _finalize(ctx: ExecContext, env: SymEnvironment) -> None:  # noqa
                 finally:
                     g_skip_assertion_for_enforcement_condition = None
 
+    ctx.model_value_repr_dict[NUM_WITNESSES_SPECIAL_MVNAME] = {
+        MVINFO_TYPE_VALUE: ModelValueInfo(
+            value_lines=[f'{len(ctx.used_witnesses)}'], got_more_values=False)
+    }
 
-def data_reference_names_show() -> None:
-    seen_data_reference_names: set[str] = set()
+    ctx.model_value_name_dict.clear()
+    if env.produce_model_values:
+        with IsolatedSolverContext():
+            if env.log_progress and mvdict_req:
+                print_as_header('Producing model value samples',
+                                level=2, is_solving=True)
 
-    def get_data_reference_names_rec() -> list[tuple[list[str], str]]:
-        result: list[tuple[list[str], str]] = []
-        drn_copy = g_data_reference_names_table.copy()
-
-        for _, vndict in drn_copy.items():
-            data_reference_names: list[str] = []
-            for dr, (value, ctx) in vndict.items():
-                if dr not in seen_data_reference_names:
-                    data_reference_names.append(dr)
-
-                g_seen_named_values.add(value.unique_name)
-
-            g_data_reference_names_table.clear()
-
-            if data_reference_names:
-                with CurrentExecContext(ctx):
-                    result.append((data_reference_names, repr(value)))
-                    seen_data_reference_names.update(data_reference_names)
-
-            result.extend(get_data_reference_names_rec())
-
-        g_seen_named_values.clear()
-        g_data_reference_names_table.clear()
-
-        return result
-
-    g_seen_named_values.clear()
-    try:
-        for data_reference_names, val in get_data_reference_names_rec():
-            cur_env().write_line(f'{INDENT}{" = ".join(data_reference_names)} = {val}')
-    finally:
-        g_seen_named_values.clear()
+            for val, name in processed_mv.items():
+                ctx.model_value_name_dict[name] = val
+                # Note: initial sample might have been added above,
+                # with set_model_value()
+                val.add_model_value_samples()
+                for mvrtype, mvr in ModelValueInfo.from_symdata(val, ctx).items():
+                    mvrdict = ctx.model_value_repr_dict.get(name, {})
+                    assert mvrtype not in mvrdict
+                    mvrdict[mvrtype] = mvr
+                    ctx.model_value_repr_dict[name] = mvrdict
+    else:
+        for val, name in ctx.get_stack_values_with_names():
+            for mvrtype, mvr in ModelValueInfo.from_symdata(val, ctx).items():
+                mvrdict = ctx.model_value_repr_dict.get(name, {})
+                assert mvrtype not in mvrdict
+                mvrdict[mvrtype] = mvr
+                ctx.model_value_repr_dict[name] = mvrdict
 
 
 def print_as_header(lines_or_str: str | Iterable[str], level: int = 0,
@@ -9347,13 +9624,17 @@ def report() -> None:  # noqa
 
     env = cur_env()
 
+    g_seen_data_references.clear()
+
     env.call_report_start_hooks()
 
     enforcements_by_path: dict[tuple['Branchpoint', ...],
                                set['Enforcement']] = {}
 
-    model_values_map: dict[tuple[int, tuple[str, ...]],
-                           list['ExecContext']] = {}
+    bps_with_mvr: list['Branchpoint'] = []
+
+    # model_values_map: dict[tuple[int, tuple[str, ...]],
+    #                        list['ExecContext']] = {}
 
     nonmodel_stack: list[SymData]
 
@@ -9363,7 +9644,7 @@ def report() -> None:  # noqa
 
     if not root_bp.context or not root_bp.context.failure:
         root_bp.process_always_true_enforcements()
-        root_bp.process_unique_enforcements()
+        root_bp.process_child_data_intersections()
         unused_value_dict = root_bp.process_unused_values()
 
     if env.log_solving_attempts:
@@ -9386,158 +9667,20 @@ def report() -> None:  # noqa
             assert bp.context.is_finalized
             got_successes = True
             got_warnings |= bool(bp.context.warnings)
-            mvals_list = []
 
-            if env.produce_model_values:
-                def get_val_str(prefix: str, sd: SymData) -> str:
-                    def vrepr(v: T_ConstrainedValueValue) -> str:
-                        if not env.minimaldata_flag and isinstance(v, bytes) and \
-                                sd.was_used_as_Int:
-                            vi = scriptnum_to_integer(v, max_size=len(v))
-                            return f'{vi} <encoded: {value_common_repr(v)}>'
-
-                        return value_common_repr(v)
-
-                    if cv := sd.get_model_value():
-                        num_samples = sd.num_model_value_samples
-                    else:
-                        cv = sd.get_constrained_value()
-                        num_samples = len(cv.possible_values) if cv else 0
-
-                    if not cv or not cv.possible_values:
-                        return f'{prefix} : ?'
-
-                    result: list[str] = []
-                    shown_sizes: set[int] = set()
-
-                    if cv.single_value is not None:
-                        result.append(f'{prefix} = {vrepr(cv.single_value)}')
-                        shown_sizes.add(len(cv.as_bytes()))
-                        got_more_sizes = False
-                    else:
-                        distinct_size_values = {
-                            len(cv.convert_to_bytes(v)): cv.possible_values[i]
-                            for i, v in enumerate(cv.possible_values)
-                        }
-
-                        vals = list(distinct_size_values.values()) + \
-                            list(set(cv.possible_values) - set(distinct_size_values.values()))
-
-                        if env.sort_model_values != 'no':
-                            if env.sort_model_values.startswith('size_'):
-                                vals.sort(key=lambda v: ((len(v) if isinstance(v, bytes)
-                                                          else (len(v.encode('utf-8'))
-                                                                if isinstance(v, str)
-                                                                else len(integer_to_scriptnum(v)))),
-                                                         v))
-                            else:
-                                vals.sort()
-
-                            if env.sort_model_values.endswith('desc'):
-                                vals.reverse()
-                            else:
-                                assert env.sort_model_values.endswith('asc')
-
-                        assert len(vals) == len(cv.possible_values)
-
-                        for i, v in enumerate(vals):
-                            if i >= num_samples:
-                                if num_samples > 1:
-                                    result.append(f'{" "*len(prefix)} : ...')
-
-                                break
-
-                            if i == 0:
-                                result.append(f'{prefix} : {vrepr(v)}')
-                            else:
-                                result.append(
-                                    f'{" "*len(prefix)} : {vrepr(v)}')
-
-                            shown_sizes.add(len(ConstrainedValue.convert_to_bytes(v)))
-                        else:
-                            result.append(f'{" "*len(prefix)} : ---')
-
-                        got_more_sizes = len(shown_sizes) != len(distinct_size_values.keys())
-
-                    if env.report_model_value_sizes:
-                        size_strings = [str(sz) for sz in shown_sizes]
-                        if got_more_sizes:
-                            size_strings.append('...')
-
-                        result.append(
-                            f'SIZE{"S" if len(size_strings) > 1 else ""}: '
-                            f'{", ".join(size_strings)}')
-
-                        result.append('')
-
-                    return '\n'.join(result)
-
-                for val in bp.context.matched_model_values:
-                    for dref_name, dref in bp.context.data_references.items():
-                        if dref == val:
-                            mvals_list.append(
-                                get_val_str(f'&{dref_name} = {val}', val))
-                            break
-                    else:
-                        mvals_list.append(get_val_str(f'{val}', val))
-            else:
-                def get_val_str(prefix: str, sd: SymData) -> str:
-                    if sd.is_static:
-                        return f'{prefix} = {sd}'
-                    else:
-                        return f'{prefix} : ?'
-
-            if env.model_values_name_match('stack'):
-                def maybe_add_dref(val: SymData, vname: str) -> str:
-                    assert bp.context
-                    for dref_name, dref in bp.context.data_references.items():
-                        if dref == val:
-                            return f' = &{dref_name}{vname}'
-
-                    return vname
-
-                stack_len = len(bp.context.stack)
-                if not env.cleanstack_flag and stack_len > 0:
-                    for i, val in enumerate(reversed(bp.context.stack)):
-                        pos = -(i+1)
-                        vname = '' if not val._name else f' = {val}'
-                        mvals_list.append(
-                            get_val_str(
-                                f'stack[{pos}]{maybe_add_dref(val, vname)}',
-                                val))
-                elif stack_len:
-                    assert stack_len == 1, \
-                        "context should have failure set otherwise"
-                    top = bp.context.stack[-1]
-                    if mvals_list:
-                        mvals_list.append('')
-
-                    vname = '' if not top._name else f' = {top}'
-                    mvals_list.append(
-                        get_val_str(
-                            f'<result>{maybe_add_dref(top, vname)}', top))
-                else:
-                    assert stack_len == 0
-                    assert env.is_incomplete_script, \
-                        "context should have failure set otherwise"
-
-            mvmap_key = (len(bp.context.used_witnesses), tuple(mvals_list))
-
-            if mvmap_key not in model_values_map:
-                model_values_map[mvmap_key] = [bp.context]
-            else:
-                model_values_map[mvmap_key].append(bp.context)
-
-        for e in bp.unique_enforcements or ():
+        for e in bp.enforcements_intersection or ():
             path = bp.get_enforcement_path(e)
             if path not in enforcements_by_path:
                 enforcements_by_path[path] = set()
             enforcements_by_path[path].add(e)
 
+        if bp.model_value_repr_intersection.values():
+            bps_with_mvr.append(bp)
+
     root_bp.walk_branches(process_enf_paths)
 
     paths = list(enforcements_by_path.keys())
-    paths.sort(key=lambda p: tuple(bp.pc for bp in p))
+    paths.sort(key=lambda p: tuple((bp.pc, bp.branch_index) for bp in p))
 
     valid_paths: list[tuple['Branchpoint', ...]] = []
 
@@ -9551,7 +9694,7 @@ def report() -> None:  # noqa
     if valid_paths:
         print_as_header('Valid paths:')
 
-    with VarnamesDisplay(show_assignments=True):
+    with VarnamesDisplay():
         for path in valid_paths:
             print_as_header([bp.repr_for_path() for bp in path] or "[Root]",
                             level=1)
@@ -9562,7 +9705,7 @@ def report() -> None:  # noqa
         else:
             print_as_header('No enforced constraints')
 
-    with VarnamesDisplay(show_assignments=True):
+    with VarnamesDisplay():
         for path in paths:
             if path:
                 print_as_header([bp.repr_for_path() for bp in path], level=1)
@@ -9575,13 +9718,13 @@ def report() -> None:  # noqa
             env.ensure_empty_line()
 
             for e in enflist:
-                env.write_line(f'        {repr(e)}')
+                env.write_line(f'{INDENT}{repr(e)}')
 
     env.ensure_empty_line()
 
     if unused_value_dict:
         print_as_header('Unused values:')
-        with VarnamesDisplay(show_assignments=True):
+        with VarnamesDisplay():
             uvset: set[tuple[str, int]] = set()
             for uv, ctx in unused_value_dict.values():
                 with CurrentExecContext(ctx):
@@ -9594,35 +9737,143 @@ def report() -> None:  # noqa
             for uvstr, src_pc in combined_uvs:
                 env.write_line(f'{INDENT}{uvstr} from {op_pos_info(src_pc)}')
 
-    if model_values_map:
-        path_msg = 'per path' if len(model_values_map) > 1 else 'for all valid paths'
-        if env.produce_model_values:
-            print_as_header(f'Witness usage and model values {path_msg}:')
-        elif env.is_incomplete_script:
-            print_as_header(f'Witness usage and stack contents {path_msg}:')
+    if env.produce_model_values:
+        print_as_header('Witness usage and model values:')
+    else:
+        print_as_header('Witness usage and stack contents:')
+
+    bps_with_mvr.sort(key=Branchpoint.tuple_for_sort)
+    for bp in bps_with_mvr:
+        path = bp.get_path()
+        if path:
+            print_as_header([bp.repr_for_path() for bp in path], level=1)
         else:
-            print_as_header(f'Witness usage {path_msg}:')
+            print_as_header("All valid paths:", level=1)
 
-        for mvmap_key, contexts in model_values_map.items():
-            assert len(contexts) > 0
-            if len(model_values_map) > 1:
-                with VarnamesDisplay():
-                    for ctx in contexts:
-                        print_as_header('\n'.join(ctx.get_timeline_strings()),
-                                        level=1)
+        mvrepr_table = bp.model_value_repr_intersection
 
-            num_witnesses, mvals = mvmap_key
-            env.write_line(f"Witnesses used: {num_witnesses}")
+        prev_line_empty = True
+
+        def get_val_str(name: str) -> str:
+            nonlocal prev_line_empty
+
+            mvrdict = mvrepr_table.get(name, {})
+            dref_names = []
+            if mvr_dr := mvrdict.get(MVINFO_TYPE_DATAREF):
+                for dn in mvr_dr.value_lines:
+                    dn_str = f'&{dn}'
+                    if dn_str != name:
+                        dref_names.append(dn_str)
+
+            if dref_names:
+                maybe_drefs = f' = {" = ".join(dref_names)}'
+            else:
+                maybe_drefs = ''
+
+            prefix = f'{INDENT}{name}{maybe_drefs}'
+
+            result: list[str] = []
+
+            mvr_v = mvrdict.get(MVINFO_TYPE_VALUE)
+            if not mvr_v:
+                result.append(f'{prefix} : ...')
+            else:
+                lines = mvr_v.value_lines.copy()
+
+                if len(lines) > 1:
+                    if mvr_v.got_more_values:
+                        lines.append('...')
+                    else:
+                        lines.append('---')
+                elif len(lines) == 0:
+                    lines.append('...')
+
+                is_first = True
+                for line in lines:
+                    if is_first:
+                        result.append(f'{prefix} {mvr_v.separator} {line}')
+                        is_first = False
+                    else:
+                        result.append(
+                            f'{" "*len(prefix)} {mvr_v.separator} {line}')
+
+            mvr_s = mvrdict.get(MVINFO_TYPE_SIZE)
+            if mvr_s:
+                maybe_plural_suffix = (
+                    "S" if len(mvr_s.value_lines) > 1 or mvr_s.got_more_values
+                    else ""
+                )
+                maybe_more = ', ...' if mvr_s.got_more_values else ''
+                result.append(
+                    f'{INDENT}# SIZE{maybe_plural_suffix}: '
+                    f'{", ".join(mvr_s.value_lines)}{maybe_more}')
+
+            for mvrtype, mvr in mvrdict.items():
+                if mvrtype not in model_value_info_default_types:
+                    if mvr.value_lines:
+                        result.append(
+                            '\n'.join(f'{INDENT}# {line}' for line in mvr.value_lines))
+                        if mvr.got_more_values:
+                            lines.append('{INDENT}# ...')
+
+            if len(result) > 1:
+                result.append('')
+                if not prev_line_empty:
+                    result.insert(0, '')
+
+            prev_line_empty = bool(result) and result[-1] == ''
+
+            result.append('')
+
+            return '\n'.join(result)
+
+        numw = bp.model_value_repr_intersection.get(
+            NUM_WITNESSES_SPECIAL_MVNAME, {}
+        ).get(MVINFO_TYPE_VALUE)
+
+        if not numw and bp.context:
+            numw = bp.context.model_value_repr_dict.get(
+                NUM_WITNESSES_SPECIAL_MVNAME, {}
+            ).get(MVINFO_TYPE_VALUE)
+
+        if numw:
+            assert len(numw.value_lines) == 1
+            env.write_line(f'Witnesses used: {numw.value_lines[0]}')
+
+        mvlines: list[str] = []
+        stack_value_info: list[str] = []
+        for name in bp.model_value_repr_intersection.keys():
+            if name == NUM_WITNESSES_SPECIAL_MVNAME:
+                pass
+            elif (name.startswith(SCRIPT_RESULT_SPECIAL_MVNAME)
+                  or name.startswith('stack[')):
+                stack_value_info.append(get_val_str(name))
+            else:
+                mvlines.append(get_val_str(name))
+
+        if env.produce_model_values and mvlines:
             env.ensure_empty_line()
+            env.write_line('Model values:')
+            for line in mvlines:
+                env.write(line)
 
-            if env.produce_model_values:
-                env.write_line('Model values:')
+        if bp.context and env.produce_model_values and \
+                env.model_values_name_match('stack'):
+            env.ensure_empty_line()
+            if len(bp.context.stack) == 0:
+                assert env.is_incomplete_script, \
+                    "context should have failure set otherwise"
+                env.write_line('Stack is empty')
             else:
                 env.write_line('Stack values:')
-
-            for ws in mvals:
-                for ln in ws.split('\n'):
-                    env.write_line(f'{INDENT}{ln}')
+                mvrepr_table = bp.context.model_value_repr_dict
+                for _, name in bp.context.get_stack_values_with_names():
+                    env.write(get_val_str(name))
+        elif stack_value_info:
+            env.ensure_empty_line()
+            env.write_line('Stack values:')
+            for sinfo in stack_value_info:
+                env.write(sinfo)
 
     env.ensure_empty_line()
 
@@ -9658,7 +9909,7 @@ def report() -> None:  # noqa
 
         def report_failures(ctx: ExecContext) -> None:
             if ctx.failure:
-                with VarnamesDisplay(show_assignments=True):
+                with VarnamesDisplay():
                     print_as_header(
                         (ctx.get_timeline_strings(skip_failed_branches=False)
                          or "All paths"), level=1)
@@ -9681,7 +9932,7 @@ def report() -> None:  # noqa
                     print_as_header("Enforcements before failure was detected:",
                                     level=2)
 
-                    with VarnamesDisplay(show_assignments=True):
+                    with VarnamesDisplay():
                         for e in ctx.enforcements:
                             env.write_line(f'{INDENT}{repr(e)}')
 
@@ -9730,6 +9981,49 @@ def report() -> None:  # noqa
             env.ensure_empty_line()
 
         root_bp.walk_contexts(report_poi, include_failed=True)
+
+    if env.data_references:
+        print_as_header('Data references:')
+        env.ensure_empty_line()
+
+    dref_table: dict[str, tuple[list[tuple[ExecContext, SymData]], list[str]]] = {}
+    for dr_for_global, (dr_for_context, dr_ctx) in env.data_references.items():
+        val = dr_ctx.data_references[dr_for_context][1]
+        with CurrentExecContext(dr_ctx):
+            with VarnamesDisplay():
+                cr = val.canonical_repr()
+
+        g_seen_data_references.add(dr_for_global)
+
+        entry = dref_table.get(cr, ([], []))
+        entry[0].append((dr_ctx, val))
+        entry[1].append(dr_for_global)
+        dref_table[cr] = entry
+
+    for vlist, drlist in dref_table.values():
+        vrepr_list: list[str] = []
+        g_data_references_to_ignore.clear()
+        g_data_references_to_ignore.update(set(drlist))
+        for vctx, v in vlist:
+            with CurrentExecContext(vctx):
+                with VarnamesDisplay():
+                    vrepr_list.append(repr(v))
+
+        env.write_line(f'{INDENT}{" = ".join(drlist)} = {vrepr_list[0]}')
+
+        for vr in vrepr_list[1:]:
+            if os.environ.get('IS_BSST_TESTS_IS_IN_PROGRESS'):
+                assert vr == vrepr_list[0], vrepr_list
+
+            if vr != vrepr_list[0]:
+                env.write_line(
+                    f'{INDENT}NOTE: the value above has another '
+                    f'representation, which is unexpected: {vr}')
+
+    env.ensure_empty_line()
+
+    g_seen_data_references.clear()
+    g_data_references_to_ignore.clear()
 
     env.call_report_end_hooks()
 

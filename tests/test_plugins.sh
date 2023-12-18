@@ -17,6 +17,14 @@ function cleanup() {
 trap cleanup EXIT
 
 cat >${TESTEXPECTED} <<END
+
+============
+Valid paths:
+============
+
+[Root]
+------
+
 ==============================
 Enforced constraints per path:
 ==============================
@@ -26,19 +34,23 @@ All valid paths:
 
         <*> BOOL(EXAMPLE(10)) @ END
 
-===================================================
-Witness usage and model values for all valid paths:
-===================================================
+===============================
+Witness usage and model values:
+===============================
+
+All valid paths:
+----------------
 Witnesses used: 0
 
-Model values:
+Stack values:
         <result> = EXAMPLE(10) = 52
 
 END
 
-echo "10 EXAMPLE" | $BSST --plugins=plugins/op_example_bsst_plugin.py --z3-enabled=true > ${TESTOUT}
+echo "10 EXAMPLE" | $BSST --plugins=plugins/op_example_bsst_plugin.py --z3-enabled=true --log-progress=false > ${TESTOUT}
 
-[ "x$(tail -n 17 ${TESTOUT})" == "x$(cat ${TESTEXPECTED})" ]
+# [ "x$(tail -n 17 ${TESTOUT})" == "x$(cat ${TESTEXPECTED})" ]
+diff -u ${TESTOUT} ${TESTEXPECTED}
 
 echo "010299" > ${TESTIN}
 cat ${TESTIN} | ${BSST} --plugins=plugins/raw_input_bsst_plugin.py --is-elements=true > ${TESTOUT}
@@ -90,13 +102,16 @@ All valid paths:
 
         EQUAL(0, SUB(wit0, CHECKSIG(\$a, \$b))) @ END
 
-==================================
-Witness usage for all valid paths:
-==================================
+=================================
+Witness usage and stack contents:
+=================================
+
+All valid paths:
+----------------
 Witnesses used: 1
 
 Stack values:
-        <result> = EQUAL(0, SUB(wit0, CHECKSIG(\$a, \$b))) : ?
+        <result> = EQUAL(0, SUB(wit0, CHECKSIG(\$a, \$b))) : one_of(0, 1)
 
 ==================
 Warnings per path:
@@ -131,9 +146,12 @@ All valid paths:
         CHECKSIG(\$a, \$b) @ 4:L1
         <*> 1 @ END
 
-==================================
-Witness usage for all valid paths:
-==================================
+=================================
+Witness usage and stack contents:
+=================================
+
+All valid paths:
+----------------
 Witnesses used: 0
 
 Stack values:
@@ -173,9 +191,12 @@ All valid paths:
         CHECKMULTISIG(2, \$c, \$b, 1, \$a) @ 8:L1
         <*> 1 @ END
 
-==================================
-Witness usage for all valid paths:
-==================================
+=================================
+Witness usage and stack contents:
+=================================
+
+All valid paths:
+----------------
 Witnesses used: 0
 
 Stack values:
@@ -214,9 +235,12 @@ All valid paths:
         EQUAL(ADD(\$b, 1), CHECKSIGADD(\$a, \$b, \$c)) @ 8:L1
         <*> 1 @ END
 
-==================================
-Witness usage for all valid paths:
-==================================
+=================================
+Witness usage and stack contents:
+=================================
+
+All valid paths:
+----------------
 Witnesses used: 0
 
 Stack values:
@@ -256,13 +280,16 @@ Unused values:
 
         CHECKSIGADD(\$e, CHECKSIGADD(\$c, CHECKSIGADD(\$a, 0, \$b), \$d), \$f) from 13:L1
 
-==================================
-Witness usage for all valid paths:
-==================================
+=================================
+Witness usage and stack contents:
+=================================
+
+All valid paths:
+----------------
 Witnesses used: 0
 
 Stack values:
-        <result> = GREATERTHANOREQUAL(CHECKSIGADD(\$c, CHECKSIGADD(\$a, 0, \$b), \$d), 1) : ?
+        <result> = GREATERTHANOREQUAL(CHECKSIGADD(\$c, CHECKSIGADD(\$a, 0, \$b), \$d), 1) : one_of(0, 1)
 
 END
 
