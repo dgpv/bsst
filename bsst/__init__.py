@@ -4240,7 +4240,11 @@ class ConstrainedValue:
         if sizes and values:
             raise ValueError('sizes and values are mutually exclusive')
 
-        self._values = tuple(set(values))
+        vset = set(values)
+        if len(vset) != len(tuple(values)):
+            raise ValueError('no duplicate values allowed')
+
+        self._values = tuple(vset)
         self._sizes = set(sizes)
 
     def clone(self) -> 'ConstrainedValue':
@@ -5789,8 +5793,11 @@ class SymData:
             return result
 
         cur_known_values = list(known_values)
+        excluded_values: set[int] = set()
 
         def exclude_value(v: int) -> None:
+            assert v not in excluded_values
+            excluded_values.add(v)
             if prefer_distinct_lengths:
                 snlen = len(integer_to_scriptnum(v))
                 if snlen == 0:
@@ -5841,6 +5848,7 @@ class SymData:
             if len(result) < max_count and not distinct_lengths_only:
                 prefer_distinct_lengths = False
                 cur_known_values.extend(result)
+                excluded_values.clear()
                 collect_model_values([self], collect, preferred_rtype=SymDataRType.INT)
 
         return result
@@ -5906,14 +5914,18 @@ class SymData:
             return result
 
         cur_known_values = list(known_values)
+        excluded_values: set[bytes] = set()  # for consistency check
 
         def exclude_value(v: bytes) -> None:
+            assert v not in excluded_values
+            excluded_values.add(v)
             if prefer_distinct_lengths:
                 if self._Length is None:
                     Check(Length(self.as_ByteSeq()) != len(v))
                 else:
                     Check(self._Length != len(v))
             else:
+                Check(_get_byte_bounding_exp(self.as_ByteSeq(), len(v)))
                 Check(self.as_ByteSeq() != IntSeqVal(v))
 
         def collect(mvdict: Optional[dict[str, 'ConstrainedValue']]) -> bool:
@@ -5952,6 +5964,7 @@ class SymData:
             if len(result) < max_count and not distinct_lengths_only:
                 prefer_distinct_lengths = False
                 cur_known_values.extend(result)
+                excluded_values.clear()
                 collect_model_values([self], collect, preferred_rtype=SymDataRType.BYTESEQ)
 
         return result
