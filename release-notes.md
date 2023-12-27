@@ -8,6 +8,8 @@ Version 0.1.2.dev0:
 
 * New setting: `--produce-model-values-for`. It is a set of glob patterns to specify which model values to produce. Please look at the help text for this setting for details. Data references now are not included in the default set to produce model values for, but can be enabled with `$*` pattern.
 
+* The setting `--points-of-interest` can now take `*` as argument: that means that execution state for all opcodes will be reported (don't forget to quote `*` in the shell to avoid shell glob pattern expansion)
+
 * More than one model value sample can be generated analyzed value, if max number of samples is specified after `:` in the pattern in `--produce-model-values-for`
 
 * Byte sizes of model value samples will be shown in the report when `--report-model-value-sizes` is set to `true`

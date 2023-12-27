@@ -246,6 +246,10 @@ class SymEnvironment:
         The "point" can be an integer - that means the program counter position
         in the script, or the string "L<num>" where "<num>" is the line number
         in the text of the script
+
+        A special value of "*" means that execution state for all opcodes
+        will be reported (don't forget to quote `*` in the shell to avoid
+        shell glob pattern expansion)
         """
         return self._points_of_interest.copy()
 
@@ -261,7 +265,10 @@ class SymEnvironment:
 
             if isinstance(poi, int) and poi < 0:
                 raise ValueError('Negative value is invalid as POI designation')
-            elif isinstance(poi, str):
+            elif poi == '*':
+                pass
+            else:
+                assert isinstance(poi, str)
                 if not poi.startswith('L'):
                     raise ValueError(
                         'Expected "L" at the start of POI designation')
@@ -9665,7 +9672,7 @@ def report() -> None:  # noqa
 
         root_bp.walk_contexts(report_failures, include_failed=True)
 
-    points_of_interest = cur_env().points_of_interest
+    points_of_interest = env.points_of_interest
     if points_of_interest:
         print_as_header('Points of interest:')
 
@@ -9673,6 +9680,8 @@ def report() -> None:  # noqa
         for poi in points_of_interest:
             if isinstance(poi, int):
                 pc_list.append(int(poi))
+            elif poi == '*':
+                pc_list = list(range(len(env.script_info.body)+1))
             else:
                 assert poi.startswith('L')
                 line_no = int(poi[1:])

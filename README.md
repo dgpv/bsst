@@ -395,6 +395,10 @@ without installing `bsst` python module.
         in the script, or the string "L<num>" where "<num>" is the line number
         in the text of the script
 
+        A special value of "*" means that execution state for all opcodes
+        will be reported (don't forget to quote `*` in the shell to avoid
+        shell glob pattern expansion)
+
   --explicitly-enabled-opcodes=''
 
         A set of opcodes to explicitly enable
