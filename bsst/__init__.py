@@ -9109,6 +9109,8 @@ def _finalize(ctx: ExecContext, env: SymEnvironment) -> None:  # noqa
                 return
 
         Check(sd.use_as_Int() == sd.depth)
+        if not env.minimaldata_flag:
+            Check(sd.use_as_ByteSeq() == IntSeqVal(sd_bytes))
 
     mvdict_req: dict[str, tuple[str, SymDataRType]] = {}
     mvnamemap: dict[str, 'SymData'] = {}
