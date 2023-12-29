@@ -5752,10 +5752,17 @@ class SymData:
                     cv_check.set_possible_values(*known_Int64_values)
             else:
                 self.use_as_ByteSeq()
-                if env.minimaldata_flag:
-                    known_byte_values = list(mv.values_as_bytes())
-                else:
-                    known_byte_values = []
+                known_byte_values = list(mv.values_as_bytes())
+                if self.was_used_as_Int and not env.minimaldata_flag:
+                    if env.log_progress:
+                        env.ensure_newline()
+                        env.write('  ')
+
+                    if not is_cond_possible(
+                        self.as_ByteSeq() == IntSeqVal(known_byte_values[0]),
+                        self, name="value's default scriptnum encoding"
+                    ):
+                        known_byte_values.clear()
 
                 diff_count = count - len(known_byte_values) + 1
                 if diff_count > 0:
