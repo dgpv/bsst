@@ -439,6 +439,11 @@ without installing `bsst` python module.
         produce. For example, 'wit*:3' will produce 3 samples for each witness.
         By default, 1 sample for each analyzed value will be produced.
 
+        NOTE: The limitation of multiple samples is that currently samples
+        are generated independently, that means for `$a $b ADD VERIFY`
+        your can get `1, 0` as possible values for both `$a` and `$b`,
+        even if they cannot be both 0 at the same time
+
         Note that if the value itself was never accessed by the script,
         the model value for it will not be produced, even if the
         pattern is given that would match it.
