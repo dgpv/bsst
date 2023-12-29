@@ -28,6 +28,8 @@ Version 0.1.2.dev0:
 
 * Fix: data placholders with same names should be assumed equal, but were not
 
+* Fix: giving numbers (offsets) in `--points-of-interest` were broken, fixed
+
 * Other minor improvements and fixes
 
 Version 0.1.1:

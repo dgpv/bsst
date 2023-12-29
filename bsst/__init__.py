@@ -263,12 +263,13 @@ class SymEnvironment:
             else:
                 poi = poi_str
 
-            if isinstance(poi, int) and poi < 0:
-                raise ValueError('Negative value is invalid as POI designation')
+            if isinstance(poi, int):
+                if poi < 0:
+                    raise ValueError('Negative value is invalid as POI designation')
             elif poi == '*':
                 pass
             else:
-                assert isinstance(poi, str)
+                assert isinstance(poi, str), (type(poi), poi_str, poi_str.isdigit())
                 if not poi.startswith('L'):
                     raise ValueError(
                         'Expected "L" at the start of POI designation')
