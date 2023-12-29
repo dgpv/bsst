@@ -6464,8 +6464,6 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                         cond=cond,
                         cond_designations=('False', 'True'))
 
-                new_context.vfExec.append(False)
-
                 def fail_on_invalid_cond() -> None:
                     expected_cond_int = int(not fValue)
 
@@ -6479,6 +6477,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                     z3check()
 
                     new_context.popstack()
+                    new_context.vfExec.append(False)
 
                 new_context.run_on_start(fail_on_invalid_cond)
 
