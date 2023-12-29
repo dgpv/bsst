@@ -2241,8 +2241,7 @@ def scriptnum_to_sym_integer(v_ByteSeq: 'z3.SeqSortRef',
 
     Check(v_Length <= max_size, err_scriptnum_encoding_exceeds_datalen())
     Check(And(*len_exps))
-    Check(Or(v_Int > -(2**((max_size)*8-1)),
-             v_Int < (2**((max_size)*8-1))),
+    Check(Abs(v_Int) < 2**((max_size)*8-1),
           err_scriptnum_out_of_bounds())
     Check(_decode_scriptnum(v_ByteSeq, v_Int, max_size, v_Length))
 
@@ -5545,6 +5544,9 @@ class SymData:
             assert self.was_used_as_Length
             scriptnum_to_sym_integer(self.as_ByteSeq(), self._Int,
                                      max_size=max_size)
+        elif self._Int is not None:
+            Check(Abs(self._Int) < 2**((max_size)*8-1),
+                  err_scriptnum_out_of_bounds())
 
         self._use_var_as(SymDataRType.INT)
 
@@ -5813,6 +5815,7 @@ class SymData:
         def exclude_value(v: int) -> None:
             assert v not in excluded_values
             excluded_values.add(v)
+
             if prefer_distinct_lengths:
                 snlen = len(integer_to_scriptnum(v))
                 if snlen == 0:
@@ -7164,7 +7167,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                 r = symresult(op, bn1, bn2)
 
             # access as_Int before checking canonical repr,
-            # so that constrants on Int symbolic variables will be
+            # so that constraints on Int symbolic variables will be
             # always set
             arg1 = bn1.use_as_Int()
             arg2 = bn2.use_as_Int()
