@@ -9526,7 +9526,7 @@ def report() -> None:  # noqa
 
     def collect_valid_paths(bp: Branchpoint, level: int) -> None:
         if bp.context and not bp.context.failure:
-            valid_paths.append(bp.get_path())
+            valid_paths.append(bp.get_path(skip_failed_branches=False))
 
     if got_successes:
         root_bp.walk_branches(collect_valid_paths)

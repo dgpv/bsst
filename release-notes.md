@@ -24,6 +24,8 @@ Version 0.1.2.dev0:
 
 * Fixes in parser: quotes within quotes were allowed, but should not; angle brackets were sometimes not ignored
 
+* Fix: in reported "Valid paths", execution path branches where only one path is valid were skipped. That was confusing, now full paths are showin in "Valid paths"
+
 * Fix: data placholders with same names should be assumed equal, but were not
 
 * Other minor improvements and fixes
