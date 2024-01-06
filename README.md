@@ -184,7 +184,7 @@ on their targets.
 Mixing scriptnum and LE64 values in assert on the same target value is not
 allowed, although mixing scriptnums with arbitrary byte expressions is allowed.
 
-### Assumptions
+### Assumptions for data placeholders
 
 Specially-formatted comments can be used to put unconditional constraints
 on data placeholders: `// bsst-assume($name):` and `// bsst-assume-size($name):`
@@ -274,7 +274,7 @@ It is possible to instrument the analysis and add new features with plugins.
 
 Please look at `plugins/README.md` for details.
 
-## Assumptions and omissions
+## Assumptions and omissions of B'SST
 
 B'SST makes certain assumptions, and omits modelling some of the aspects of the script.
 
