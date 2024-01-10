@@ -7746,6 +7746,8 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                 ikey = 0
                 sigcnt = nSigsCount.as_scriptnum_int()
                 keyscnt = nKeysCount.as_scriptnum_int()
+                is_n_of_n = sigcnt == keyscnt
+
                 while sigcnt > 0:
                     sig = signatures[isig]
                     pub = pubkeys[ikey]
@@ -7766,6 +7768,10 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                     if sigcnt > keyscnt:
                         r.set_static(0)
                         break
+
+                if is_n_of_n:
+                    Check(Implies(r.as_Int() == 1,
+                                  And(*[s.Length() > 0 for s in signatures])))
 
                 if env.nullfail_flag:
                     Check(Implies(r.as_Int() == 0,
