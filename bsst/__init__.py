@@ -3007,15 +3007,18 @@ def add_pubkey_constraints(vchPubKey: 'SymData'
                            ) -> Optional[Union[bool, 'z3.BoolRef']]:
     env = cur_env()
 
-    pub_len = vchPubKey.Length()
+    pub_len = vchPubKey.Length(ignore_known_sizes=True)
     pub = vchPubKey.use_as_ByteSeq()
     if env.witness_pubkeytype_flag and env.sigversion == SigVersion.WITNESS_V0:
-        vchPubKey.set_possible_sizes(33, value_name='CPubKey')
-        Check(And(pub_len == 33, Or(pub[0] == 2, pub[0] == 3)),
-              err_invalid_pubkey())
+        vchPubKey.set_possible_sizes(33, value_name='CPubKey',
+                                     update_solver=False)
+        Check(pub_len == 33, err_invalid_pubkey_length())
+        Check(Or(pub[0] == 2, pub[0] == 3), err_invalid_pubkey())
     else:
         if env.strictenc_flag:
-            vchPubKey.set_possible_sizes(33, 65, value_name='CPubKey')
+            vchPubKey.set_possible_sizes(33, 65, value_name='CPubKey',
+                                         update_solver=False)
+            Check(Or(pub_len == 33, pub_len == 65), err_invalid_pubkey_length())
             Check((pub_len == 33) == Or(pub[0] == 2, pub[0] == 3),
                   err_invalid_pubkey())
             Check((pub_len == 65) == (pub[0] == 4),
@@ -3037,10 +3040,10 @@ def add_xonly_pubkey_constraints(vchPubKey: 'SymData', *,
 
     if env.discourage_upgradeable_pubkey_type_flag or not for_signature_check:
 
-        Check(vchPubKey.Length() == 32,
+        vchPubKey.set_possible_sizes(32, value_name='XOnlyPubKey',
+                                     update_solver=False)
+        Check(vchPubKey.Length(ignore_known_sizes=True) == 32,
               err_invalid_pubkey_length())
-
-        vchPubKey.set_possible_sizes(32, value_name='XOnlyPubKey')
 
         maybe_upgradeable_pub = False
     else:
@@ -3185,8 +3188,7 @@ def add_schnorr_sig_constraints(vchSig: 'SymData',
 
     if not env.z3_enabled and isinstance(is_upgradeable_pub, bool) and \
             not is_upgradeable_pub:
-        vchSig.set_possible_sizes(0, 64, 65,
-                                  value_name='SchnorrScignature')
+        vchSig.set_possible_sizes(0, 64, 65, value_name='SchnorrScignature')
 
     if vchSig.is_static and vchSig.Length() < 65:
         hash_type = 1
@@ -5866,9 +5868,10 @@ class SymData:
 
         return value
 
-    def Length(self) -> Union[int, 'z3.ArithRef']:
+    def Length(self, ignore_known_sizes: bool = False) -> Union[int, 'z3.ArithRef']:
         if len(self.possible_sizes) == 1:
-            return self.possible_sizes[0]
+            if self.is_static or not ignore_known_sizes:
+                return self.possible_sizes[0]
 
         assert not self.is_static
 
