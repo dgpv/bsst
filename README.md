@@ -229,7 +229,7 @@ The reports show:
     - If the value is totally unknown, it will be `?`
     - If pattern in `--produce-model-values-for` specifies more than one sample to generate per analyzed value, the successive values will be printed on separate lines. This list of values will be terminated with `: ...` if there are more values possible, and with `: ---` if it is determined that only the listed values are possible
     - Model value samples are generated in a way to have distinct byte sizes if possible
-    - If `--report-model-value-sizes` is set to `true`, then below each model value in the report will be the line with `SIZE:` or `SIZES:` followed by possible byte sizes for this model value. When not all possible sizes are shown, the list of sizes will end with `...`, like this: `SIZES: 2, 3, ...`. When `...` is present, that means that the analysis didn't find complete set of sizes, and *any* size that less than 520 is possible (in the `2, 3, ...` example, size 1 still possible)
+    - If `--report-model-value-sizes` is set to `true`, then below each model value in the report will be the line with `Size = ` or `Sizes:` followed by possible byte sizes for this model value. When not all possible sizes are shown, the list of sizes will end with `...`, like this: `Sizes: 2, 3, ...`. When `...` is present, that means that the analysis didn't find complete set of sizes, and *any* size that less than 520 is possible (in the `2, 3, ...` example, size 1 still possible)
 
 * Warnings: possible issues dected while symbolically executing the script, that do not lead to script failure,
   but it is probably better to examine them and understand if they are problematic or not

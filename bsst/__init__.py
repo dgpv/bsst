@@ -9824,12 +9824,12 @@ def report() -> None:  # noqa
             mvr_s = mvrdict.get(MVINFO_TYPE_SIZE)
             if mvr_s:
                 maybe_plural_suffix = (
-                    "S" if len(mvr_s.value_lines) > 1 or mvr_s.got_more_values
-                    else ""
+                    "s:" if len(mvr_s.value_lines) > 1 or mvr_s.got_more_values
+                    else " ="
                 )
                 maybe_more = ', ...' if mvr_s.got_more_values else ''
                 result.append(
-                    f'{INDENT}# SIZE{maybe_plural_suffix}: '
+                    f'{INDENT}# Size{maybe_plural_suffix} '
                     f'{", ".join(mvr_s.value_lines)}{maybe_more}')
 
             for mvrtype, mvr in mvrdict.items():

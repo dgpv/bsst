@@ -46,7 +46,7 @@ Model values:
         wit0 : 2
              : 1
              : ---
-        # SIZE: 1
+        # Size = 1
 
 END
 
@@ -87,7 +87,7 @@ Model values:
              : 0 <encoded: x('0000')>
              : 0 <encoded: x('0080')>
              : ---
-        # SIZES: 1, 2
+        # Sizes: 1, 2
 
 END
 
@@ -126,7 +126,7 @@ Model values:
         wit0 : 0 <encoded: x('00')>
              : 0 <encoded: x('80')>
              : ...
-        # SIZES: 1, ...
+        # Sizes: 1, ...
 
 END
 
