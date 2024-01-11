@@ -10719,7 +10719,7 @@ def parse_cmdline_args(args: Iterable[str]) -> None:  # noqa
             sys.exit()
 
         if '=' in arg:
-            argname, value_str = arg[2:].split('=')
+            argname, value_str = arg[2:].split('=', maxsplit=1)
         else:
             argname = arg[2:]
             value_str = ''
