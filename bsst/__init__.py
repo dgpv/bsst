@@ -3102,25 +3102,30 @@ def add_ecdsa_sig_constraints(vchSig: Union['SymData', 'z3.ExprRef'], *,  # noqa
 
     lenR = sig[3]
 
+    # NOTE: sig elements might not be 0-255 bounded (for speed),
+    # so we need to check that they are positive required (like sig[4] >= 0),
+    # and we need to use `> 0` instead of `!= 0` to avoid negative values
+
     Check(Or(is_sig_empty,
              And(sig[0] == 0x30,  # A signature is of type 0x30 (compound).
                  sig[1] == sig_size - 3,  # length covers the entire signature.
                  sig[2] == 2,  # the R element is an integer
-                 lenR != 0,  # Zero-length integers are not allowed for R.
+                 lenR > 0,  # Zero-length integers are not allowed for R.
                  # length of the S element is inside the signature
                  5 + lenR < sig_size,
+                 sig[4] >= 0,
                  sig[4] < 0x80,  # Negative numbers are not allowed for R
                  # Null bytes at the start of R are not allowed, unless R would
                  # otherwise be interpreted as a negative number.
                  Or(lenR == 1,
-                    sig[4] != 0,
+                    sig[4] > 0,
                     sig[5] >= 0x80))),
           err_invalid_signature_encoding())
 
     lenS = sig[5+lenR]
 
     Check(Or(is_sig_empty,
-             And(lenS != 0,  # Zero-length integers are not allowed for S
+             And(lenS > 0,  # Zero-length integers are not allowed for S
                  # length of the signature must matche the sum of the length
                  # of the elements.
                  lenR + lenS + 7 == sig_size)),
@@ -3128,11 +3133,12 @@ def add_ecdsa_sig_constraints(vchSig: Union['SymData', 'z3.ExprRef'], *,  # noqa
 
     Check(Or(is_sig_empty,
              And(sig[lenR+4] == 2,  # Check whether the S element is an integer
+                 sig[lenR+6] >= 0,
                  sig[lenR+6] < 0x80,  # Negative numbers are not allowed for S
                  # Null bytes at the start of S are not allowed, unless S would otherwise be
                  # interpreted as a negative number.
                  Or(lenS == 1,
-                    sig[lenR + 6] != 0,
+                    sig[lenR + 6] > 0,
                     sig[lenR + 7] >= 0x80))),
           err_invalid_signature_encoding())
 
