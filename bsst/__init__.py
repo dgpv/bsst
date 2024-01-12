@@ -1057,6 +1057,45 @@ class SymEnvironment:
         self._cleanstack_flag = value
 
     @property
+    def max_samples_for_dynamic_stack_access(self) -> int:
+        """Opcodes like OP_PICK, OP_ROLL, CHECKMULTISIG access different
+        positions on the stack based on their arguments. This means that
+        for each possible value of an argument that affects the stack access
+        pattern, a separate execution path must be created.
+
+        When `z3_enabled` is false, B'SST cannot find possible values of these
+        arguments, unless they are 'static', i.e. come from explicitly
+        stated values, or can be inferred by simple analysis.
+
+        When `z3_enabled` is true, B'SST will try to generate as many samples
+        of the argument value as this setting allows. If the number of possible
+        values are less than this limit, for each of the generated values,
+        a separate execution path will be created and analyzed. If there are
+        more possible values than this setting allows, there will be
+        "unexplored" execution paths - a failed paths where the failure cause
+        is shown as "The path was not explored". There will also be a note at
+        the beginning of the report if there are any unexplored paths present.
+
+        Since each instance of such dynamic stack access argument can create
+        many execution paths, successive encounters of opcodes with such
+        arguments means exponential growth in the number of paths to analyze.
+
+        If there are too many paths, you may try to reduce the 'analysis space'
+        by lowering the value of this setting, or by limiting possible values
+        of such opcode arguments with other means, for example with
+        `// bsst-assume($arg):` comments, in case these arguments are
+        data placeholders.
+        """
+        return self._max_samples_for_dynamic_stack_access
+
+    @max_samples_for_dynamic_stack_access.setter
+    def max_samples_for_dynamic_stack_access(self, value: int) -> None:
+        if value < 0:
+            raise ValueError('negative size is not valid')
+
+        self._max_samples_for_dynamic_stack_access = value
+
+    @property
     def max_tx_size(self) -> int:
         """Maximum transaction size in bytes (used to limit tx weight as
         max_tx_size*4). Only relevant in Elements mode
@@ -1178,6 +1217,7 @@ class SymEnvironment:
         self._low_s_flag = True
         self._nullfail_flag = True
         self._cleanstack_flag = True
+        self._max_samples_for_dynamic_stack_access = 3
         self._max_tx_size = 1000000
         self._max_num_inputs = 24386
         self._max_num_outputs = self._max_tx_size // (9+1+33+33)
@@ -1708,6 +1748,8 @@ MANUAL_TRACKED_ASSERTION_PREFIX = '_line_'
 TOTAL_TRACKED_ASSERTION_PREFIX = '_tracked_'
 NUM_WITNESSES_SPECIAL_MVNAME = '<NUM_WITNESSES>'
 SCRIPT_RESULT_SPECIAL_MVNAME = '<result>'
+
+UNEXPLORED_FAILURE_STRING = '<UNEXPLORED>'
 
 POSSIBLE_TX_VERSIONS = (0, 1, 2)
 
@@ -3465,7 +3507,8 @@ def cur_env() -> 'SymEnvironment':
 
 
 @contextmanager
-def CurrentOp(op_or_sd: Optional[Union['OpCode', 'ScriptData']]
+def CurrentOp(op_or_sd: Optional[Union['OpCode', 'ScriptData']],
+              with_timing: bool = True,
               ) -> Generator[None, None, None]:
     global g_current_op
 
@@ -3476,8 +3519,10 @@ def CurrentOp(op_or_sd: Optional[Union['OpCode', 'ScriptData']]
 
     env = cur_env()
 
-    if env.log_solving_attempts:
+    if with_timing:
         env.elapsed_time_track_start_time = time.monotonic()
+
+    if env.log_solving_attempts:
         if env.do_progressive_z3_checks and \
                 (op_or_sd is None or isinstance(op_or_sd, OpCode)):
             ctx = cur_context()
@@ -3493,7 +3538,7 @@ def CurrentOp(op_or_sd: Optional[Union['OpCode', 'ScriptData']]
         g_current_op = prev_op
 
         if env.do_progressive_z3_checks and env.log_solving_attempts and \
-                isinstance(op_or_sd, OpCode):
+                isinstance(op_or_sd, OpCode) and with_timing:
             end = time.monotonic()
             env.solving_log(f"... {end-env.elapsed_time_track_start_time:.02f} seconds\n")
 
@@ -5075,27 +5120,94 @@ class ExecContext(SupportsFailureCodeCallbacks):
 
     def branch(self: T_ExecContext, *,
                cond: Optional[Union['SymData', tuple['SymData', ...]]] = None,
-               cond_designations: tuple[str, str] = ('True', 'False')
-               ) -> T_ExecContext:
+               cond_designations: tuple[str, ...] = ('True', 'False')
+               ) -> tuple[T_ExecContext, ...]:
 
-        assert cond_designations[0] != cond_designations[1]
+        assert len(set(cond_designations)) == len(cond_designations)
 
-        new_context = self.clone()
-        new_context.exec_state_log[new_context.pc] = self.exec_state.clone()
-        new_context.pc += 1
+        if len(cond_designations) < 2:
+            raise ValueError('at least 2 cond_designations must be given')
 
-        bp = self.branchpoint  # save, because Branchpoint() will overwrite
-        self.branchpoint.set_branches(
-            (Branchpoint(pc=self.pc, cond=cond,
-                         designation=cond_designations[0],
-                         parent=bp, context=self, branch_index=0),
-             Branchpoint(pc=self.pc, cond=cond,
-                         designation=cond_designations[1],
-                         parent=bp, context=new_context, branch_index=1)))
+        # Note: self.branchpoint will be overwritten
+        # by Branchpoint(..., context=self) below, need to save that value
+        # to call set_branches() later
+        bp = self.branchpoint
+        branches: list[Branchpoint] = [
+            Branchpoint(pc=self.pc, cond=cond,
+                        designation=cond_designations[0],
+                        parent=bp, context=self, branch_index=0)
+        ]
+
+        contexts: list[T_ExecContext] = [self]
+
+        for designation in cond_designations[1:]:
+            new_context = self.clone()
+            new_context.exec_state_log[new_context.pc] = self.exec_state.clone()
+            new_context.pc += 1
+
+            contexts.append(new_context)
+            branches.append(Branchpoint(pc=self.pc, cond=cond,
+                                        designation=designation,
+                                        parent=bp, context=new_context,
+                                        branch_index=len(branches)))
+
+        bp.set_branches(branches)
 
         z3_push_context()
 
-        return new_context
+        return tuple(contexts)
+
+    def generate_branches_for_dynamic_int_arg(
+        self, sd: 'SymData', *,
+        max_samples: Optional[int] = None, arg_name: str = '',
+        set_branch_cond: bool = True
+    ) -> int:
+        assert sd.was_used_as_Int
+
+        if max_samples is None:
+            max_samples = cur_env().max_samples_for_dynamic_stack_access
+
+        possible_args = sd.collect_integer_model_values(
+            max_count=max_samples+1,
+            max_scriptnum_size=SCRIPTNUM_DEFAULT_SIZE)
+
+        if len(possible_args) == 1:
+            sd.set_static(possible_args[0])
+            return possible_args[0]
+
+        arg_prefix = f'{arg_name} = ' if arg_name else ''
+
+        designations = [f'{arg_prefix}{arg}'
+                        for arg in possible_args[:max_samples]]
+
+        if bool(possible_args[max_samples:]):
+            unexplored_str = ",".join(
+                f'{arg}' for arg in possible_args[max_samples:])
+            arg_prefix = f'{arg_name} : ' if arg_name else ''
+            designations.append(
+                f'{arg_prefix}{unexplored_str}, ...')
+
+        cond = sd if set_branch_cond else None
+        contexts = self.branch(cond=cond, cond_designations=tuple(designations))
+
+        assert contexts[0] == self
+        for i, arg in enumerate(possible_args[1:max_samples]):
+            # NOTE: arg_value kwarg is a workaround for python closures
+            # being late-binding, this way captured value will be current,
+            # for each iteration, not always the last one in the loop
+            def on_start(arg_value: int = arg) -> None:
+                then_ctx = cur_context()
+                then_ctx.pc -= 1
+                sd.set_static(arg_value)
+                z3check()
+
+            contexts[i+1].run_on_start(on_start)
+
+        for unexplored_ctx in contexts[max_samples:]:
+            unexplored_ctx.failure = (self.pc, UNEXPLORED_FAILURE_STRING)
+
+        sd.set_static(possible_args[0])
+        return possible_args[0]
 
     def run_on_start(self, fun: Callable[[], None]) -> None:
         self._run_on_start.append(fun)
@@ -5113,7 +5225,7 @@ class ExecContext(SupportsFailureCodeCallbacks):
         self.pc -= 1
 
         try:
-            with CurrentOp(env.script_info.body[self.pc]):
+            with CurrentOp(env.script_info.body[self.pc], with_timing=False):
                 for fun in self._run_on_start:
                     fun()
                 for c, c_name in self._z3_on_start:
@@ -6542,7 +6654,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
         popped_or_erased_values.append(v)
 
     def erase(index: int) -> None:
-        # we have access the stack element before deleting it to check
+        # we have to access the stack element before deleting it to check
         # for stack bounds. Also we need to remember it to check refcount later
         v = stacktop(index)
         popped_or_erased_values.append(v)
@@ -6771,12 +6883,13 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                     fValue = True
 
                 if op == OP_IF:
-                    new_context = ctx.branch(cond=cond)
+                    _, new_context = ctx.branch(cond=cond)
                 else:
                     fValue = not fValue
-                    new_context = ctx.branch(
+                    _, new_context = ctx.branch(
                         cond=cond,
-                        cond_designations=('False', 'True'))
+                        cond_designations=('False', 'True')
+                    )
 
                 def fail_on_invalid_cond() -> None:
                     expected_cond_int = int(not fValue)
@@ -6928,7 +7041,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
             cond = stacktop(-1)
 
-            new_context = ctx.branch(cond=cond)
+            _, new_context = ctx.branch(cond=cond)
 
             new_context.run_on_start(
                 lambda: Check(use_as_script_bool(cond) == 0,
@@ -6987,23 +7100,30 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
             bn1 = stacktop(-1)
             bn1.increase_refcount()  # mark as used
 
-            # NOTE: It is possible to create execution branches for
-            # different values of the argument.
-            # We should be able allow this for small values of the argument without
-            # blowing up simulation time. The question is if PICK/ROLL with
-            # dynamic arguments happen in useful scripts at all.
-            if not bn1.is_static:
-                raise non_static_value_error(f'{op.name}: non-static argument')
+            if bn1.is_static:
+                val_pos = bn1.as_scriptnum_int()
+                if val_pos < 0:
+                    raise ScriptFailure(f'{op.name}: negative argument')
+                if val_pos >= MAX_STACK_SIZE:
+                    raise ScriptFailure(f'{op.name}: argument too big')
+            elif not env.z3_enabled:
+                raise BSSTError(
+                    f'{op.name} with non-static argument '
+                    f'@ {op_pos_info(ctx.pc)}: Cannot proceed with '
+                    f'analysis when z3 is not enabled')
+            else:
+                bn1.use_as_Int()
+                Check(bn1.as_Int() >= 0, err_invalid_arguments())
+                Check(bn1.as_Int() < MAX_STACK_SIZE, err_invalid_arguments())
+                val_pos = ctx.generate_branches_for_dynamic_int_arg(bn1)
 
-            val_pos = bn1.as_scriptnum_int()
-            if val_pos < 0:
-                raise ScriptFailure(f'{op.name}: negative argument')
-            if val_pos >= MAX_STACK_SIZE:
-                raise ScriptFailure(f'{op.name}: argument too big')
+            z3check()
+
             popstack()
             val = stacktop(-val_pos-1)
             if op == OP_ROLL:
                 erase(-val_pos-1)
+
             push(val)
 
         scope()
@@ -7712,22 +7832,30 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
             stackpos = 1
             nKeysCount = stacktop(-stackpos)
 
-            if not nKeysCount.is_static:
-                non_static_value_error(
-                    f"cannot use it for number of keys for "
-                    f"{op.name} at {op_pos_info(ctx.pc)}")
-
-            if nKeysCount.as_scriptnum_int() < 0 or \
-                    nKeysCount.as_scriptnum_int() > MAX_PUBKEYS_PER_MULTISIG:
-                raise ScriptFailure(
-                    f'{op.name}: invalid keys count {nKeysCount.as_scriptnum_int()}')
+            if nKeysCount.is_static:
+                num_keys = nKeysCount.as_scriptnum_int()
+                if num_keys < 0 or num_keys > MAX_PUBKEYS_PER_MULTISIG:
+                    raise ScriptFailure(
+                        f'{op.name}: invalid keys count {num_keys}')
+            elif not env.z3_enabled:
+                raise BSSTError(
+                    f"Non-static argument for number of keys for "
+                    f"{op.name} @ {op_pos_info(ctx.pc)}: Cannot proceed "
+                    f"with analysis when z3 is not enabled")
+            else:
+                nKeysCount.use_as_Int()
+                Check(nKeysCount.as_Int() >= 0, err_invalid_arguments())
+                Check(nKeysCount.as_Int() <= MAX_PUBKEYS_PER_MULTISIG,
+                      err_invalid_arguments())
+                num_keys = ctx.generate_branches_for_dynamic_int_arg(
+                    nKeysCount, arg_name='num_keys', set_branch_cond=False)
 
             ctx.segwit_mode_op_count += nKeysCount.as_scriptnum_int()
             if ctx.segwit_mode_op_count > MAX_OPS_PER_SCRIPT_SEGWIT_MODE:
                 raise ScriptFailure('Maximum opcode count is reached')
 
             pubkeys = []
-            for _ in range(nKeysCount.as_scriptnum_int()):
+            for _ in range(num_keys):
                 stackpos += 1
                 pub = stacktop(-stackpos)
                 pub.use_as_ByteSeq()
@@ -7736,18 +7864,26 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
             stackpos += 1
 
             nSigsCount = stacktop(-stackpos)
-            if not nSigsCount.is_static:
-                non_static_value_error(
-                    f"cannot use it for number of signatures for {op.name} "
-                    f"at {op_pos_info(ctx.pc)}")
 
-            if nSigsCount.as_scriptnum_int() < 0 or \
-                    nSigsCount.as_scriptnum_int() > nKeysCount.as_scriptnum_int():
-                raise ScriptFailure(
-                    f'{op.name}: invalid signature count {nKeysCount.as_scriptnum_int()}')
+            if nSigsCount.is_static:
+                num_sigs = nSigsCount.as_scriptnum_int()
+                if num_sigs < 0 or num_sigs > num_keys:
+                    raise ScriptFailure(
+                        f'{op.name}: invalid signature count {nKeysCount.as_scriptnum_int()}')
+            elif not env.z3_enabled:
+                raise BSSTError(
+                    f"Non-static argument for number of sinatures for "
+                    f"{op.name} @ {op_pos_info(ctx.pc)}: Cannot proceed with "
+                    f"analysis when z3 is not enabled")
+            else:
+                nSigsCount.use_as_Int()
+                Check(nSigsCount.as_Int() >= 0, err_invalid_arguments())
+                Check(nSigsCount.as_Int() <= num_keys, err_invalid_arguments())
+                num_sigs = ctx.generate_branches_for_dynamic_int_arg(
+                    nSigsCount, arg_name='num_signatures', set_branch_cond=False)
 
             signatures = []
-            for _ in range(nSigsCount.as_scriptnum_int()):
+            for _ in range(num_sigs):
                 stackpos += 1
                 sig = stacktop(-stackpos)
                 sig.use_as_ByteSeq()
@@ -7763,8 +7899,8 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
                 isig = 0
                 ikey = 0
-                sigcnt = nSigsCount.as_scriptnum_int()
-                keyscnt = nKeysCount.as_scriptnum_int()
+                sigcnt = num_sigs
+                keyscnt = num_keys
                 is_n_of_n = sigcnt == keyscnt
 
                 while sigcnt > 0:
@@ -8294,9 +8430,11 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                                   == IntSeqVal(b'\x00'*32)))
 
                     if not should_skip_immediately_failed_branch():
-                        new_context = ctx.branch(
+                        _, new_context = ctx.branch(
                             cond=bn,
-                            cond_designations=('Has issuance', 'No issuance'))
+                            cond_designations=('Has issuance', 'No issuance')
+                        )
+
                         fflag = SymData(name=f'{op.name}_FAILURE_FLAG')
                         fflag.use_as_Int()
                         new_context.run_on_start(lambda: new_context.push(fflag))
@@ -8547,9 +8685,10 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
             r_sf.set_as_Int(If(args_invalid, 0, 1))
 
             if not should_skip_immediately_failed_branch():
-                new_context = ctx.branch(
+                _, new_context = ctx.branch(
                     cond=(vcha, vchb),
-                    cond_designations=('Success branch', 'Failure branch'))
+                    cond_designations=('Success branch', 'Failure branch')
+                )
                 new_context.run_on_start(lambda: new_context.push(r_sf))
                 new_context.run_on_start(
                     lambda: Check(r_sf.as_Int() == 0, err_branch_condition_invalid(),
@@ -8591,9 +8730,10 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
             res_sf.set_as_Int(If(args_invalid, 0, 1))
 
             if not should_skip_immediately_failed_branch():
-                new_context = ctx.branch(
+                _, new_context = ctx.branch(
                     cond=(vcha, vchb),
-                    cond_designations=('Success branch', 'Failure branch'))
+                    cond_designations=('Success branch', 'Failure branch')
+                )
                 new_context.run_on_start(lambda: new_context.push(res_sf))
                 new_context.run_on_start(
                     lambda: Check(res_sf.as_Int() == 0, err_branch_condition_invalid(),
@@ -8682,9 +8822,10 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
             r_sf.set_as_Int(If(args_invalid, 0, 1))
 
             if not should_skip_immediately_failed_branch():
-                new_context = ctx.branch(
+                _, new_context = ctx.branch(
                     cond=vcha,
-                    cond_designations=('Success branch', 'Failure branch'))
+                    cond_designations=('Success branch', 'Failure branch')
+                )
                 new_context.run_on_start(lambda: new_context.push(r_sf))
                 new_context.run_on_start(
                     lambda: Check(r_sf.as_Int() == 0, err_branch_condition_invalid(),
@@ -9678,6 +9819,7 @@ def report() -> None:  # noqa
     if env.log_solving_attempts:
         env.solving_log_ensure_empty_line()
 
+    got_unexplored = False
     got_warnings = False
     got_failures = False
     got_successes = False
@@ -9686,10 +9828,14 @@ def report() -> None:  # noqa
         nonlocal got_successes
         nonlocal got_warnings
         nonlocal got_failures
+        nonlocal got_unexplored
 
         if bp.context:
             if bp.context.failure:
                 got_failures = True
+                if bp.context.failure[1] == UNEXPLORED_FAILURE_STRING:
+                    got_unexplored = True
+
                 return
 
             assert bp.context.is_finalized
@@ -9718,6 +9864,9 @@ def report() -> None:  # noqa
 
     if got_successes:
         root_bp.walk_branches(collect_valid_paths)
+
+    if got_unexplored:
+        print_as_header('NOTE: There are execution paths that was not explored')
 
     if valid_paths:
         print_as_header('Valid paths:')
@@ -9941,6 +10090,10 @@ def report() -> None:  # noqa
                     print_as_header(
                         (ctx.get_timeline_strings(skip_failed_branches=False)
                          or "All paths"), level=1)
+
+                if ctx.failure[1] == UNEXPLORED_FAILURE_STRING:
+                    env.write_line('The path was not explored')
+                    return
 
                 finfo = ctx.failure_info
                 if isinstance(finfo, str):
@@ -10815,7 +10968,7 @@ def main_cli() -> None:
                 parse_cmdline_args(sys.argv[1:])
                 main()
         except BSSTError as e:
-            print(e)
+            print(f'\n{e.__class__.__name__}:', e)
             sys.exit(-1)
     else:
         signal.signal(signal.SIGCHLD, sigchld_handler)

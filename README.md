@@ -723,6 +723,36 @@ without installing `bsst` python module.
         SCRIPT_VERIFY_CLEANSTACK
         Will be false if `--is-incomplete-script` is true
 
+  --max-samples-for-dynamic-stack-access=3
+
+        Opcodes like OP_PICK, OP_ROLL, CHECKMULTISIG access different
+        positions on the stack based on their arguments. This means that
+        for each possible value of an argument that affects the stack access
+        pattern, a separate execution path must be created.
+        
+        When `--z3-enabled` is false, B'SST cannot find possible values of these
+        arguments, unless they are 'static', i.e. come from explicitly
+        stated values, or can be inferred by simple analysis.
+        
+        When `--z3-enabled` is true, B'SST will try to generate as many samples
+        of the argument value as this setting allows. If the number of possible
+        values are less than this limit, for each of the generated values,
+        a separate execution path will be created and analyzed. If there are
+        more possible values than this setting allows, there will be
+        "unexplored" execution paths - a failed paths where the failure cause
+        is shown as "The path was not explored". There will also be a note at
+        the beginning of the report if there are any unexplored paths present.
+        
+        Since each instance of such dynamic stack access argument can create
+        many execution paths, successive encounters of opcodes with such
+        arguments means exponential growth in the number of paths to analyze.
+        
+        If there are too many paths, you may try to reduce the 'analysis space'
+        by lowering the value of this setting, or by limiting possible values
+        of such opcode arguments with other means, for example with
+        `// bsst-assume($arg):` comments, in case these arguments are
+        data placeholders.
+
   --max-tx-size=1000000
 
         Maximum transaction size in bytes (used to limit tx weight as
