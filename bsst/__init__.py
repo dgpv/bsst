@@ -2216,7 +2216,7 @@ def integer_to_scriptnum(v: int) -> bytes:
 
 def scriptnum_to_sym_integer(v_ByteSeq: 'z3.SeqSortRef',
                              v_Int: 'z3.ArithRef',
-                             *, max_size: int = 4,
+                             *, max_size: int = SCRIPTNUM_DEFAULT_SIZE,
                              ) -> None:
     if max_size > 5:
         raise ValueError(f'unsupported max_size {max_size}')
@@ -4566,7 +4566,7 @@ class ConstrainedValue:
 
         return self._value_as_bool(v)
 
-    def as_scriptnum_int(self, *, max_size: int = 4) -> int:
+    def as_scriptnum_int(self, *, max_size: int = SCRIPTNUM_DEFAULT_SIZE) -> int:
         v = self.single_value
         if v is None:
             raise ValueError('single value is not available')
@@ -4590,7 +4590,8 @@ class ConstrainedValue:
     def values_as_bool(self) -> tuple[bool, ...]:
         return tuple(self._value_as_bool(v) for v in self._values)
 
-    def values_as_scriptnum_int(self, *, max_size: int = 4) -> tuple[int, ...]:
+    def values_as_scriptnum_int(self, *, max_size: int = SCRIPTNUM_DEFAULT_SIZE
+                                ) -> tuple[int, ...]:
         if not self._values:
             return ()
 
@@ -4638,7 +4639,7 @@ class ConstrainedValue:
         return False
 
     def _value_as_scriptnum_int(self, v: T_ConstrainedValueValue, *,
-                                max_size: int = 4) -> int:
+                                max_size: int = SCRIPTNUM_DEFAULT_SIZE) -> int:
         r: int
         if isinstance(v, int):
             max_value = 2**(8*max_size-1)-1
@@ -5696,7 +5697,7 @@ class SymData:
         return f'{self._unique_name}_Length'
 
     def set_as_Int(self, v: Union[int, 'z3.ArithRef'],
-                   max_size: int = 4) -> None:
+                   max_size: int = SCRIPTNUM_DEFAULT_SIZE) -> None:
         if max_size > 5:
             raise ValueError(f'unsupported max_size {max_size}')
 
@@ -5803,9 +5804,11 @@ class SymData:
 
     def _get_used_as_Int_maxsize(self) -> tuple[int, int]:
         ctx = cur_context()
-        return ctx._used_as_Int_maxsize.get(self._unique_name, (4, ctx.pc))
+        return ctx._used_as_Int_maxsize.get(self._unique_name,
+                                            (SCRIPTNUM_DEFAULT_SIZE, ctx.pc))
 
-    def use_as_Int(self, max_size: int = 4) -> Union[int, 'z3.ArithRef']:
+    def use_as_Int(self, max_size: int = SCRIPTNUM_DEFAULT_SIZE
+                   ) -> Union[int, 'z3.ArithRef']:
         ctx = cur_context()
         if self.was_used_as_Int:
             assert self.possible_sizes
@@ -6094,7 +6097,8 @@ class SymData:
 
     def collect_integer_model_values(  # noqa
         self, max_count: int, known_values: Iterable[int] = (),
-        max_scriptnum_size: int = 4, prefer_distinct_lengths: bool = False,
+        max_scriptnum_size: int = SCRIPTNUM_DEFAULT_SIZE,
+        prefer_distinct_lengths: bool = False,
         distinct_lengths_only: bool = False
     ) -> list[int]:
 
@@ -7439,9 +7443,9 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
             if op in (OP_NOT, OP_0NOTEQUAL):
                 r.set_possible_values(0, 1)
 
-            max_size = 4
+            max_size = SCRIPTNUM_DEFAULT_SIZE
             if op in (OP_1ADD, OP_1SUB):
-                max_size = 5
+                max_size += 1
 
             r.set_as_Int(op_table[op](bn.use_as_Int()), max_size=max_size)
 
@@ -7515,9 +7519,9 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                     elif op == OP_NUMNOTEQUAL:
                         r.set_static(0)
 
-            max_size = 4
+            max_size = SCRIPTNUM_DEFAULT_SIZE
             if op in (OP_ADD, OP_SUB):
-                max_size = 5
+                max_size += 1
 
             r.set_as_Int(op_table[op](arg1, arg2), max_size=max_size)
 
