@@ -6,7 +6,7 @@ Version 0.1.2.dev0:
 
 * Add ability to set assertions on stack values and witnesses, and assumptions for data placeholders. Please see newly added "Assertions" and "Assumptions" sections in README. You might also look at `tests/test_assertions_and_assumptions.py` for examples of usage
 
-* Add ability to analyse opcodes that access the stack differently based on their arguments, like `PICK`, `ROLL`, `CHECKMULTISIG`, even if these arguments are not statically known. When z3 is enabled, model values for these arguments will be generated, and separate execution path for each generated value will be created. Maximum number of samples to generate is set with `--max-samples-for-dynamic-stack-access`. When z3 is not enabled, analysis will stop with an error when these opcodes with non-static arguments are encountered.
+* Add ability to analyze opcodes that access the stack differently based on their arguments, like `PICK`, `ROLL`, `CHECKMULTISIG`, even if these arguments are not statically known. When z3 is enabled, model values for these arguments will be generated, and separate execution path for each generated value will be created. Maximum number of samples to generate is set with `--max-samples-for-dynamic-stack-access`. When z3 is not enabled, analysis will stop with an error when these opcodes with non-static arguments are encountered.
 
 * New setting: `--produce-model-values-for`. It is a set of glob patterns to specify which model values to produce. Please look at the help text for this setting for details. Data references now are not included in the default set to produce model values for, but can be enabled with `$*` pattern.
 
