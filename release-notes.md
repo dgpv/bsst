@@ -18,9 +18,9 @@ Version 0.1.2.dev0:
 
 * Settings that accept a comma-separated set of values, when the setting argument is given twice, now update the set rather than replace it
 
-* Improved reporting for data references. Now data references are printed at the end of the report.
+* Improved reporting for data references. Now data references are printed at the end of the report
 
-* Add settings to set comment marker. Note that comments are removed before parsing the rest of the line, and because of this, comment markers cannot appear within quoted strings
+* Add setting to set comment marker: `--comment-marker`. Note that comments are removed before parsing the rest of the line, and because of this, comment markers cannot appear within quoted strings
 
 * Fix: scriptnum decoding was not imposing "0 >= x => 255" bound on the byte sequence if its size was 1. This was causing problems with `bsst-assume` tests, but likely that this could have caused problems elsewhere, too
 
