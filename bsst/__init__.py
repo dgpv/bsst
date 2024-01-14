@@ -5161,28 +5161,41 @@ class ExecContext(SupportsFailureCodeCallbacks):
         self, sd: 'SymData', *,
         max_samples: Optional[int] = None, arg_name: str = '',
         set_branch_cond: bool = True
-    ) -> int:
+    ) -> None:
         assert sd.was_used_as_Int
 
-        if max_samples is None:
-            max_samples = cur_env().max_samples_for_dynamic_stack_access
+        env = cur_env()
 
-        possible_args = sd.collect_integer_model_values(
-            max_count=max_samples+1,
-            max_scriptnum_size=SCRIPTNUM_DEFAULT_SIZE)
+        if max_samples is None:
+            max_samples = env.max_samples_for_dynamic_stack_access
+
+        possible_args: list[bytes] | list[int] = []
+
+        if env.minimaldata_flag:
+            possible_args = sd.collect_integer_model_values(
+                max_count=max_samples+1,
+                max_scriptnum_size=SCRIPTNUM_DEFAULT_SIZE)
+        else:
+            possible_args = sd.collect_byte_model_values(
+                max_count=max_samples+1)
+
+        if not possible_args:
+            z3check()  # try to catch any constraint violations first
+            raise ScriptFailure(
+                f'no possible values for non-static argument {arg_name}')
 
         if len(possible_args) == 1:
             sd.set_static(possible_args[0])
-            return possible_args[0]
+            return
 
         arg_prefix = f'{arg_name} = ' if arg_name else ''
 
-        designations = [f'{arg_prefix}{arg}'
+        designations = [f'{arg_prefix}{value_common_repr(arg)}'
                         for arg in possible_args[:max_samples]]
 
         if bool(possible_args[max_samples:]):
-            unexplored_str = ",".join(
-                f'{arg}' for arg in possible_args[max_samples:])
+            unexplored_str = ", ".join(value_common_repr(arg)
+                                       for arg in possible_args[max_samples:])
             arg_prefix = f'{arg_name} : ' if arg_name else ''
             designations.append(
                 f'{arg_prefix}{unexplored_str}, ...')
@@ -5191,23 +5204,26 @@ class ExecContext(SupportsFailureCodeCallbacks):
         contexts = self.branch(cond=cond, cond_designations=tuple(designations))
 
         assert contexts[0] == self
-        for i, arg in enumerate(possible_args[1:max_samples]):
-            # NOTE: arg_value kwarg is a workaround for python closures
+        for i in range(1, max_samples):
+            if i >= len(possible_args):
+                continue
+
+            # NOTE: idx kwarg is a workaround for python closures
             # being late-binding, this way captured value will be current,
             # for each iteration, not always the last one in the loop
-            def on_start(arg_value: int = arg) -> None:
+            def on_start(idx: int = i) -> None:
                 then_ctx = cur_context()
                 then_ctx.pc -= 1
-                sd.set_static(arg_value)
+                sd.set_static(possible_args[idx])
                 z3check()
 
-            contexts[i+1].run_on_start(on_start)
+            contexts[i].run_on_start(on_start)
 
         for unexplored_ctx in contexts[max_samples:]:
             unexplored_ctx.failure = (self.pc, UNEXPLORED_FAILURE_STRING)
 
         sd.set_static(possible_args[0])
-        return possible_args[0]
+        return
 
     def run_on_start(self, fun: Callable[[], None]) -> None:
         self._run_on_start.append(fun)
@@ -7100,22 +7116,24 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
             bn1 = stacktop(-1)
             bn1.increase_refcount()  # mark as used
 
-            if bn1.is_static:
-                val_pos = bn1.as_scriptnum_int()
-                if val_pos < 0:
-                    raise ScriptFailure(f'{op.name}: negative argument')
-                if val_pos >= MAX_STACK_SIZE:
-                    raise ScriptFailure(f'{op.name}: argument too big')
-            elif not env.z3_enabled:
-                raise BSSTError(
-                    f'{op.name} with non-static argument '
-                    f'@ {op_pos_info(ctx.pc)}: Cannot proceed with '
-                    f'analysis when z3 is not enabled')
-            else:
+            if not bn1.is_static:
+                if not env.z3_enabled:
+                    raise BSSTError(
+                        f'{op.name} with non-static argument '
+                        f'@ {op_pos_info(ctx.pc)}: Cannot proceed with '
+                        f'analysis when z3 is not enabled')
+
                 bn1.use_as_Int()
                 Check(bn1.as_Int() >= 0, err_invalid_arguments())
                 Check(bn1.as_Int() < MAX_STACK_SIZE, err_invalid_arguments())
-                val_pos = ctx.generate_branches_for_dynamic_int_arg(bn1)
+                ctx.generate_branches_for_dynamic_int_arg(bn1)
+
+            val_pos = bn1.as_scriptnum_int()
+            if val_pos < 0:
+                raise ScriptFailure(f'{op.name}: negative argument')
+
+            if val_pos >= MAX_STACK_SIZE:
+                raise ScriptFailure(f'{op.name}: argument too big')
 
             z3check()
 
@@ -7832,23 +7850,24 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
             stackpos = 1
             nKeysCount = stacktop(-stackpos)
 
-            if nKeysCount.is_static:
-                num_keys = nKeysCount.as_scriptnum_int()
-                if num_keys < 0 or num_keys > MAX_PUBKEYS_PER_MULTISIG:
-                    raise ScriptFailure(
-                        f'{op.name}: invalid keys count {num_keys}')
-            elif not env.z3_enabled:
-                raise BSSTError(
-                    f"Non-static argument for number of keys for "
-                    f"{op.name} @ {op_pos_info(ctx.pc)}: Cannot proceed "
-                    f"with analysis when z3 is not enabled")
-            else:
+            if not nKeysCount.is_static:
+                if not env.z3_enabled:
+                    raise BSSTError(
+                        f"Non-static argument for number of keys for "
+                        f"{op.name} @ {op_pos_info(ctx.pc)}: Cannot proceed "
+                        f"with analysis when z3 is not enabled")
+
                 nKeysCount.use_as_Int()
                 Check(nKeysCount.as_Int() >= 0, err_invalid_arguments())
                 Check(nKeysCount.as_Int() <= MAX_PUBKEYS_PER_MULTISIG,
                       err_invalid_arguments())
-                num_keys = ctx.generate_branches_for_dynamic_int_arg(
+                ctx.generate_branches_for_dynamic_int_arg(
                     nKeysCount, arg_name='num_keys', set_branch_cond=False)
+
+            num_keys = nKeysCount.as_scriptnum_int()
+            if num_keys < 0 or num_keys > MAX_PUBKEYS_PER_MULTISIG:
+                raise ScriptFailure(
+                    f'{op.name}: invalid keys count {num_keys}')
 
             ctx.segwit_mode_op_count += nKeysCount.as_scriptnum_int()
             if ctx.segwit_mode_op_count > MAX_OPS_PER_SCRIPT_SEGWIT_MODE:
@@ -7865,22 +7884,23 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
             nSigsCount = stacktop(-stackpos)
 
-            if nSigsCount.is_static:
-                num_sigs = nSigsCount.as_scriptnum_int()
-                if num_sigs < 0 or num_sigs > num_keys:
-                    raise ScriptFailure(
-                        f'{op.name}: invalid signature count {nKeysCount.as_scriptnum_int()}')
-            elif not env.z3_enabled:
-                raise BSSTError(
-                    f"Non-static argument for number of sinatures for "
-                    f"{op.name} @ {op_pos_info(ctx.pc)}: Cannot proceed with "
-                    f"analysis when z3 is not enabled")
-            else:
+            if not nSigsCount.is_static:
+                if not env.z3_enabled:
+                    raise BSSTError(
+                        f"Non-static argument for number of sinatures for "
+                        f"{op.name} @ {op_pos_info(ctx.pc)}: Cannot proceed "
+                        f"with analysis when z3 is not enabled")
+
                 nSigsCount.use_as_Int()
                 Check(nSigsCount.as_Int() >= 0, err_invalid_arguments())
                 Check(nSigsCount.as_Int() <= num_keys, err_invalid_arguments())
-                num_sigs = ctx.generate_branches_for_dynamic_int_arg(
+                ctx.generate_branches_for_dynamic_int_arg(
                     nSigsCount, arg_name='num_signatures', set_branch_cond=False)
+
+            num_sigs = nSigsCount.as_scriptnum_int()
+            if num_sigs < 0 or num_sigs > num_keys:
+                raise ScriptFailure(
+                    f'{op.name}: invalid signature count {nKeysCount.as_scriptnum_int()}')
 
             signatures = []
             for _ in range(num_sigs):
