@@ -463,4 +463,61 @@ echo '1 checkmultisig' | ${BSST} --z3-enabled=true --is-incomplete-script=true -
 
 diff -u ${TESTOUT} ${TESTEXPECTED}
 
+cat >${TESTEXPECTED} <<END
+
+============
+Valid paths:
+============
+
+PICK \$a @ 1:L2 : x('0000')
+--------------------------
+
+PICK \$a @ 1:L2 : x('0100')
+--------------------------
+
+=======================
+No enforced constraints
+=======================
+
+===============================
+Witness usage and model values:
+===============================
+
+PICK \$a @ 1:L2 : x('0000')
+--------------------------
+Witnesses used: 1
+
+Model values:
+        wit0 : ?
+        \$a = 0 <encoded: x('0000')>
+
+Stack values:
+        stack[-1] = wit0 : ...
+        stack[-2] = wit0 : ...
+
+PICK \$a @ 1:L2 : x('0100')
+--------------------------
+Witnesses used: 2
+
+Model values:
+        wit0 : ?
+        wit1 : ?
+        \$a = 1 <encoded: x('0100')>
+
+Stack values:
+        stack[-1] = wit1 : ...
+        stack[-2] = wit0 : ...
+        stack[-3] = wit1 : ...
+
+END
+
+cat >${TESTIN} <<END
+// bsst-assume(\$a): 0x0000 0x0100
+\$a pick
+END
+
+cat ${TESTIN} | ${BSST} --z3-enabled=true --is-incomplete-script=true --produce-model-values-for='*' --log-progress=false --minimaldata-flag=false >${TESTOUT}
+
+diff -u ${TESTOUT} ${TESTEXPECTED}
+
 echo "DYNAMIC STACK ACCESS TEST SUCCESS"
