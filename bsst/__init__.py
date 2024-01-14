@@ -5188,6 +5188,8 @@ class ExecContext(SupportsFailureCodeCallbacks):
             sd.set_static(possible_args[0])
             return
 
+        possible_args.sort()
+
         arg_prefix = f'{arg_name} = ' if arg_name else ''
 
         designations = [f'{arg_prefix}{value_common_repr(arg)}'
