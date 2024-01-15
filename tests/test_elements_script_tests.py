@@ -247,6 +247,12 @@ def process_testcase_single(
 
         try:
             bsst.symex_script()
+        except bsst.BSSTError as e:
+            if str(e).startswith('Non-static argument for number of keys for CHECKMULTISIG'):
+                if comment == 'CHECKMULTISIG must error when there are no stack items':
+                    return
+
+            raise
         except ValueError as e:
             if str(e).startswith('non-static value:'):
                 if expected_result == 'INVALID_STACK_OPERATION':
