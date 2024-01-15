@@ -5176,6 +5176,7 @@ class ExecContext(SupportsFailureCodeCallbacks):
                 max_count=max_samples+1,
                 max_scriptnum_size=SCRIPTNUM_DEFAULT_SIZE)
         else:
+            sd.use_as_ByteSeq()
             possible_args = sd.collect_byte_model_values(
                 max_count=max_samples+1)
 
