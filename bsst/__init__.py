@@ -1091,7 +1091,8 @@ class SymEnvironment:
     @max_samples_for_dynamic_stack_access.setter
     def max_samples_for_dynamic_stack_access(self, value: int) -> None:
         if value < 0:
-            raise ValueError('negative size is not valid')
+            raise ValueError(
+                'max samples for dynamic stack access cannot be negative')
 
         self._max_samples_for_dynamic_stack_access = value
 
@@ -5182,10 +5183,17 @@ class ExecContext(SupportsFailureCodeCallbacks):
 
         if not possible_args:
             z3check()  # try to catch any constraint violations first
+            argnm = f' {arg_name}' if arg_name else ''
             raise ScriptFailure(
-                f'no possible values for non-static argument {arg_name}')
+                f'No possible values for non-static argument{argnm}')
 
         if len(possible_args) == 1:
+            if max_samples == 0:
+                argnm = f' {arg_name}' if arg_name else ''
+                raise ScriptFailure(
+                    f'No possible values for non-static argument{argnm} '
+                    f'when "max samples for dynamic stack access" is 0')
+
             sd.set_static(possible_args[0])
             return
 
@@ -7890,7 +7898,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
             if not nSigsCount.is_static:
                 if not env.z3_enabled:
                     raise BSSTError(
-                        f"Non-static argument for number of sinatures for "
+                        f"Non-static argument for number of signatures for "
                         f"{op.name} @ {op_pos_info(ctx.pc)}: Cannot proceed "
                         f"with analysis when z3 is not enabled")
 
