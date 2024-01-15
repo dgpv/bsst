@@ -34,6 +34,7 @@ def FreshEnv(*, z3_enabled: bool = False
     env.z3_enabled = z3_enabled
     env.use_parallel_solving = False
     env.solver_timeout_seconds = 0
+    env.max_samples_for_dynamic_stack_access = 0
 
     with bsst.CurrentEnvironment(env):
         with bsst.CurrentExecContext(env.get_root_branch().context):
@@ -249,27 +250,17 @@ def process_testcase_single(
             bsst.symex_script()
         except bsst.BSSTError as e:
             if str(e).startswith('Non-static argument for number of keys for CHECKMULTISIG'):
-                if comment == 'CHECKMULTISIG must error when there are no stack items':
+                if comment in (
+                    'CHECKMULTISIG must error when there are no stack items',
+                    'CHECKMULTISIG must error when there are not enough pubkeys on the stack',
+                ):
                     return
 
-            raise
-        except ValueError as e:
-            if str(e).startswith('non-static value:'):
-                if expected_result == 'INVALID_STACK_OPERATION':
+            if str(e).startswith('Non-static argument for number of signatures for CHECKMULTISIG'):
+                if comment in (
+                    'CHECKMULTISIG must error when there are not enough pubkeys on the stack',
+                ):
                     return
-
-                if use_nonstatic_witnesses:
-                    if expected_result == 'OK' and \
-                            str(e).endswith(' non-static argument'):
-                        return
-
-                    if expected_result in ('OK', 'SIG_COUNT') and \
-                            re.search(' cannot use it for number of keys ', str(e)):
-                        return
-
-                    if expected_result == 'UNKNOWN_ERROR' and \
-                            str(e).endswith(' non-static argument'):
-                        return
 
             raise
 
@@ -277,6 +268,25 @@ def process_testcase_single(
 
         bsst.report()
         sys.stdout.flush()
+
+        for f in failures:
+            if (
+                f.startswith('No possible values for non-static argument')
+                and f.endswith(' when "max samples for dynamic stack access" is 0')
+            ):
+                if expected_result == 'INVALID_STACK_OPERATION':
+                    return
+
+                if use_nonstatic_witnesses:
+                    if expected_result == 'OK':
+                        return
+
+                    # if expected_result == 'UNKNOWN_ERROR':
+                    #     return
+
+                    if expected_result == 'SIG_COUNT' and \
+                            re.search(' num_keys ', f):
+                        return
 
         if expected_result == 'OK':
             if comment.startswith('2-of-2 CHECKMULTISIG NOT with '
