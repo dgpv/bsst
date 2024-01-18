@@ -7431,7 +7431,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                 if vch1.is_static:
                     data = vch1.as_bytes()
 
-                    r_data = bytearray((b'\x00'*full_bytes) + data + b'')
+                    r_data = bytearray((b'\x00'*full_bytes) + data + b'\x00')
 
                     temp = 0
                     for i in range(len(r_data)):
