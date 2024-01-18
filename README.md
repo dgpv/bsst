@@ -205,6 +205,10 @@ or an assumed constraint on data placeholder might possibly relate to a script
 failure, you can still see error code `check_assumption_at_line_<N>` where `<N>`
 points to the line with an assumption
 
+## Alias names for witnesses
+
+Specially-formatted comments can be used to add alias names to witnesses, like this: `// bsst-name-alias(wit0): alias_name`. With this, Witness 0 will be shown in the report as `alias_name<wit0>`.
+
 ## Reports
 
 The reports show:

@@ -3832,18 +3832,21 @@ class ScriptInfo:
     _data_reference_positions: dict[int, str]
     _assertion_positions: dict[int, tuple[BsstAssertion, ...]]
     _assumption_table: dict[str, tuple[BsstAssumption, ...]]
+    _name_aliases: dict[str, str]
 
     def __init__(self, *, body: Iterable[OpCode | ScriptData] = (),
                  line_no_table: Iterable[int] = (),
-                 data_reference_positions: Mapping[int, str] = {},
-                 assertion_positions: Mapping[int, Iterable[BsstAssertion]] = {},
-                 assumption_table: Mapping[str, Iterable[BsstAssumption]] = {}
+                 data_reference_positions: Optional[Mapping[int, str]] = None,
+                 assertion_positions: Optional[Mapping[int, Iterable[BsstAssertion]]] = None,
+                 assumption_table: Optional[Mapping[str, Iterable[BsstAssumption]]] = None,
+                 name_aliases: Optional[Mapping[str, str]] = None
                  ):
         self.body = tuple(body)
         self.line_no_table = tuple(line_no_table)
-        self._data_reference_positions = {k: v for k, v in data_reference_positions.items()}
-        self._assertion_positions = {k: tuple(v) for k, v in assertion_positions.items()}
-        self._assumption_table = {k: tuple(v) for k, v in assumption_table.items()}
+        self._data_reference_positions = {k: v for k, v in (data_reference_positions or {}).items()}
+        self._assertion_positions = {k: tuple(v) for k, v in (assertion_positions or {}).items()}
+        self._assumption_table = {k: tuple(v) for k, v in (assumption_table or {}).items()}
+        self._name_aliases = {k: v for k, v in (name_aliases or {}).items()}
 
     def data_reference_at(self, line_no: int) -> str | None:
         return self._data_reference_positions.get(line_no)
@@ -3855,6 +3858,9 @@ class ScriptInfo:
     def bsst_assumptions_for(self, dph_name: str
                              ) -> tuple[BsstAssumption, ...] | None:
         return self._assumption_table.get(dph_name)
+
+    def name_alias_for(self, name: str) -> Optional[str]:
+        return self._name_aliases.get(name)
 
 
 def op_pos_repr(pc: int) -> str:
@@ -5333,7 +5339,10 @@ class ExecContext(SupportsFailureCodeCallbacks):
                     f"witness wit{wit_no} cannot be accessed, because having "
                     f"this many witnesses would cause stack overflow earlier")
 
-            wit = SymData(name=f'wit{wit_no}', witness_number=wit_no)
+            env = cur_env()
+            witname = f'wit{wit_no}'
+            wit = SymData(name=witname, witness_number=wit_no,
+                          name_alias=env.script_info.name_alias_for(witname))
             wit.increase_refcount()
             self.stack.insert(0, wit)
             self.used_witnesses.append(wit)
@@ -5428,6 +5437,7 @@ class SymData:
     _data_reference: str | None = None
     _data_reference_was_reset: bool = False
     _unique_name: str
+    _name_alias: str
 
     _Int: Optional['z3.ArithRef'] = None
     _Int64: Optional['z3.ArithRef'] = None
@@ -5440,6 +5450,7 @@ class SymData:
                  static_value: str | bytes | bytearray | int | IntLE64 | None = None,
                  unique_name: str | None = None,
                  possible_sizes: Iterable[int] = (),
+                 name_alias: str | None = None
                  ) -> None:
 
         self._args = tuple(args)
@@ -5454,6 +5465,7 @@ class SymData:
                     "opcode names")
 
         self._name = name
+        self._name_alias = name_alias
         self._wit_no = witness_number
 
         env = cur_env()
@@ -5763,7 +5775,12 @@ class SymData:
         if dr := self._maybe_data_reference():
             return dr
 
-        name = with_name or self._name or '_'
+        if with_name:
+            name = with_name
+        else:
+            name = self._name or '_'
+            if self._name_alias:
+                name = f'{self._name_alias}<{name}>'
 
         result_str: str | None = None
         if self._name == 'CAT':
@@ -9347,6 +9364,7 @@ def parse_script_lines(script_lines: Iterable[str],    # noqa
 
     body: list[OpCode | ScriptData] = []
     line_no_table: list[int] = []
+    name_aliases: dict[str, str] = {}
     data_reference_positions: dict[int, str] = {}
     assertion_positions: dict[int, list[BsstAssertion]] = {}
     assumption_table: dict[str, list[BsstAssumption]] = {}
@@ -9382,9 +9400,25 @@ def parse_script_lines(script_lines: Iterable[str],    # noqa
             line = line[:comment_pos]
             if m := re.match('\\s*=>(\\S+)', comment):
                 data_reference = m.group(1)
+            elif m := re.match('\\s*bsst-name-alias\\(([^)]*)\\):(.*)', comment):
+                name_to_alias = m.group(1)
+                alias_name = m.group(2).strip()
+                if not re.match('wit(\\d+)$', name_to_alias):
+                    die('only aliases for witnesses are recognized')
 
-            if m := re.match('\\s*bsst-(assert|assume|plugin)(-size)?([^:]*):(.*)',
-                             comment):
+                if not alias_name.isidentifier():
+                    die('alias name must be an identifier')
+
+                if name_to_alias in name_aliases:
+                    die('duplicate alias')
+
+                if name_to_alias in name_aliases.values():
+                    die('duplicate alias name')
+
+                name_aliases[name_to_alias] = alias_name
+
+            elif m := re.match('\\s*bsst-(assert|assume|plugin)(-size)?([^:]*):(.*)',
+                               comment):
                 bsst_comment_type = m.group(1)
                 is_for_size = bool(m.group(2))
                 bsst_comment_arg = m.group(3)
@@ -9540,7 +9574,8 @@ def parse_script_lines(script_lines: Iterable[str],    # noqa
     return ScriptInfo(body=body, line_no_table=line_no_table,
                       data_reference_positions=data_reference_positions,
                       assertion_positions=assertion_positions,
-                      assumption_table=assumption_table)
+                      assumption_table=assumption_table,
+                      name_aliases=name_aliases)
 
 def finalize(ctx: ExecContext) -> None:  # noqa
     env = cur_env()

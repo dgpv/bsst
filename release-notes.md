@@ -8,6 +8,8 @@ Version 0.1.2.dev0:
 
 * Add ability to analyze opcodes that access the stack differently based on their arguments, like `PICK`, `ROLL`, `CHECKMULTISIG`, even if these arguments are not statically known. When z3 is enabled, model values for these arguments will be generated, and separate execution path for each generated value will be created. Maximum number of samples to generate is set with `--max-samples-for-dynamic-stack-access`. When z3 is not enabled, analysis will stop with an error when these opcodes with non-static arguments are encountered.
 
+* Add ability to set aliases for witnesses with `// bsst-name-alias(wit<N>): alias_name` (where <N> is withess number)
+
 * New setting: `--produce-model-values-for`. It is a set of glob patterns to specify which model values to produce. Please look at the help text for this setting for details. Data references now are not included in the default set to produce model values for, but can be enabled with `$*` pattern.
 
 * More than one model value sample can be generated per analyzed value, if max number of samples is specified after `:` in the pattern given with `--produce-model-values-for` setting. The limitation of multiple samples is that samples are generated independently, that means for `$a $b ADD VERIFY` your can get `1, 0` as possible values for both `$a` and `$b`, even if they cannot be both 0 at the same time
