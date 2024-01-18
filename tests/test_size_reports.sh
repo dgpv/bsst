@@ -43,8 +43,8 @@ All valid paths:
 Witnesses used: 1
 
 Model values:
-        wit0 : 2
-             : 1
+        wit0 : 1
+             : 2
              : ---
         # Size = 1
 

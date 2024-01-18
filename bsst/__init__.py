@@ -1201,7 +1201,7 @@ class SymEnvironment:
         self._produce_model_values = True
         self._produce_model_values_for: dict[str, int] = {}  # expected empty (updated when set)
         self._report_model_value_sizes = False
-        self._sort_model_values = 'no'
+        self._sort_model_values = 'size_asc'
         self._check_always_true_enforcements = True
         self._exit_on_solver_result_unknown = True
         self._tag_data_with_position = False

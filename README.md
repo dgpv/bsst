@@ -450,7 +450,7 @@ without installing `bsst` python module.
         the model value for it will not be produced, even if the
         pattern is given that would match it.
 
-  --sort-model-values='no'
+  --sort-model-values='size_asc'
 
         When more than one sample is generated for model values, they can
         be sorted by their byte size: in ascending order if this setting
