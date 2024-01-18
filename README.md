@@ -454,7 +454,7 @@ without installing `bsst` python module.
         the model value for it will not be produced, even if the
         pattern is given that would match it.
 
-  --sort-model-values='size_asc'
+  --sort-model-values='default'
 
         When more than one sample is generated for model values, they can
         be sorted by their byte size: in ascending order if this setting
@@ -464,7 +464,9 @@ without installing `bsst` python module.
         the sorting will be done by the byte size of the value, and after that,
         by the value itself.
 
-        When set to 'no', model values will not be sorted
+        Default mode 'default' is special in that it will first show values
+        that have distinct sizes in ascending order of their sizes, and after
+        that, the rest of the values unsorted
 
   --report-model-value-sizes=false
 

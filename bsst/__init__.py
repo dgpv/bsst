@@ -413,16 +413,18 @@ class SymEnvironment:
         the sorting will be done by the byte size of the value, and after that,
         by the value itself.
 
-        When set to 'no', model values will not be sorted
+        Default mode 'default' is special in that it will first show values
+        that have distinct sizes in ascending order of their sizes, and after
+        that, the rest of the values unsorted
         """
         return self._sort_model_values
 
     @sort_model_values.setter
     def sort_model_values(self, value: str) -> None:
-        if value not in ('no', 'asc', 'desc', 'size_asc', 'size_desc'):
+        if value not in ('default', 'asc', 'desc', 'size_asc', 'size_desc'):
             raise ValueError(
-                "Only 'asc', 'desc', 'size_asc', size_desc', "
-                "or 'no' are allowed as sorting mode for model values")
+                "Only 'asc', 'desc', 'size_asc', size_desc' "
+                "or 'default' are allowed as sorting mode for model values")
 
         self._sort_model_values = value
 
@@ -1206,7 +1208,7 @@ class SymEnvironment:
         self._produce_model_values = True
         self._produce_model_values_for: dict[str, int] = {}  # expected empty (updated when set)
         self._report_model_value_sizes = False
-        self._sort_model_values = 'size_asc'
+        self._sort_model_values = 'default'
         self._check_always_true_enforcements = True
         self._exit_on_solver_result_unknown = True
         self._tag_data_with_position = False
@@ -4319,16 +4321,22 @@ class ModelValueInfo:
             else:
                 shown_sizes.update(set(mv.possible_sizes))
         else:
-            vals = list(distinct_size_values.values()) + \
-                list(set(mv.possible_values) - set(distinct_size_values.values()))
+            def size_sort_key(v: bytes | str | int
+                              ) -> tuple[int, bytes | str | int]:
+                return ((len(v) if isinstance(v, bytes)
+                         else (len(v.encode('utf-8'))
+                               if isinstance(v, str)
+                               else len(integer_to_scriptnum(v)))),
+                        v)
 
-            if env.sort_model_values != 'no':
+            vals = list(distinct_size_values.values())
+            vals.sort(key=size_sort_key)
+            vals.extend(list(set(mv.possible_values)
+                             - set(distinct_size_values.values())))
+
+            if env.sort_model_values != 'default':
                 if env.sort_model_values.startswith('size_'):
-                    vals.sort(key=lambda v: ((len(v) if isinstance(v, bytes)
-                                              else (len(v.encode('utf-8'))
-                                                    if isinstance(v, str)
-                                                    else len(integer_to_scriptnum(v)))),
-                                             v))
+                    vals.sort(key=size_sort_key)
                 else:
                     vals.sort()
 
@@ -5437,7 +5445,7 @@ class SymData:
     _data_reference: str | None = None
     _data_reference_was_reset: bool = False
     _unique_name: str
-    _name_alias: str
+    _name_alias: str | None
 
     _Int: Optional['z3.ArithRef'] = None
     _Int64: Optional['z3.ArithRef'] = None

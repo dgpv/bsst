@@ -50,7 +50,7 @@ Model values:
 
 END
 
-echo '1 3 within' | ${BSST} --z3-enabled=true --produce-model-values-for='wit*:3' --report-model-value-sizes=true --log-progress=false > ${TESTOUT}
+echo '1 3 within' | ${BSST} --z3-enabled=true --produce-model-values-for='wit*:3' --report-model-value-sizes=true --sort-model-values=asc --log-progress=false > ${TESTOUT}
 
 diff -u ${TESTOUT} ${TESTEXPECTED}
 
