@@ -281,9 +281,6 @@ def process_testcase_single(
                     if expected_result == 'OK':
                         return
 
-                    # if expected_result == 'UNKNOWN_ERROR':
-                    #     return
-
                     if expected_result == 'SIG_COUNT' and \
                             re.search(' num_keys ', f):
                         return
