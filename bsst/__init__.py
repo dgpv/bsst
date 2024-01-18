@@ -429,6 +429,11 @@ class SymEnvironment:
     @property
     def report_model_value_sizes(self) -> bool:
         """Add information about byte size of produced model values in the report
+
+        NOTE: reported sizes are sorted in ascending order. If there are
+        more possible sizes than reported, it is not implied that sizes lower
+        than the reported are not possible. For example, "# Sizes: 1, 2, ..."
+        does not mean size 0 is not possible
         """
         return self._report_model_value_sizes
 
