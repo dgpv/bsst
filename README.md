@@ -251,6 +251,8 @@ as modelled by B'SST. Since modelling is not perfect, sometimes incomplete, thes
 for execution of the script on "real" interpreter. For example, for ECDSA pubkeys only constraints on size and
 first byte are modelled, and model value can show arbitrary data for the rest of pubkey.
 
+NOTE: Model value samples are generated independently from each other, that means for `$a $b ADD VERIFY` your can get `1, 0` as possible values for both `$a` and `$b`, even if they cannot be both 0 at the same time
+
 NOTE: With Z3 enabled, failure report may give several possible causes for the failure. It does not mean that
 all of these conditions are a definite cause of this particular failure. Some of them may be false positives,
 but this is the nature of Z3 - it gives 'possible causes' for constraint violation, and for the report to give
@@ -444,11 +446,6 @@ without installing `bsst` python module.
         Pattern can be suffexed with ':' followed by the number of samples to
         produce. For example, 'wit*:3' will produce 3 samples for each witness.
         By default, 1 sample for each analyzed value will be produced.
-
-        NOTE: The limitation of multiple samples is that samples
-        are generated independently, that means for `$a $b ADD VERIFY`
-        your can get `1, 0` as possible values for both `$a` and `$b`,
-        even if they cannot be both 0 at the same time
 
         Note that if the value itself was never accessed by the script,
         the model value for it will not be produced, even if the
