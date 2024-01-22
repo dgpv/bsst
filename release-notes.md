@@ -1,6 +1,6 @@
 # B'SST release notes
 
-Version 0.1.2.dev0:
+Version 0.1.2
 
 * Rework plugin system, now plugins are 'general' in a sense that they can hook into different stages of analysis to observe or change various things. Please look at `plugins` directory for details
 
