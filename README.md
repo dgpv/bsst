@@ -282,6 +282,22 @@ It is possible to instrument the analysis and add new features with plugins.
 
 Please look at `plugins/README.md` for details.
 
+## Miner / non-miner distinction
+
+It is important to note that default setting for `--is-miner` is false, that
+means that the execution environment of the script will be assumed to be as for
+the normal network node, not the miner.
+
+Miner can ignore a lot of restrictions that are placed on the normal node, and
+therefore analysis of the scripts with `--is-miner=true` are likely to be longer
+and there are likely to be more possible values for witnesses, etc.
+
+Because of this, `--is-miner` is false by default.
+
+It is nevertheless important to also perform analysis with `--is-miner=true` to
+be able to notice issues that a malicious miner will be able to exploit.
+Please do not forget to analyze scripts in both miner and non-miner contexts.
+
 ## Assumptions and omissions of B'SST
 
 B'SST makes certain assumptions, and omits modelling some of the aspects of the script.
