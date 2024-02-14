@@ -1754,7 +1754,7 @@ SCRIPT_RESULT_SPECIAL_MVNAME = '<result>'
 
 UNEXPLORED_FAILURE_STRING = '<UNEXPLORED>'
 
-POSSIBLE_TX_VERSIONS = (0, 1, 2)
+STANDARD_TX_VERSIONS = (1, 2)
 
 MAX_PUBKEYS_PER_MULTISIG = 20
 MAX_OPS_PER_SCRIPT_SEGWIT_MODE = 201
@@ -4885,8 +4885,9 @@ class TransactionFieldValues:
             self._nVersion = SymData(name='tx_nVersion',
                                      possible_sizes=(4,))
             self._nVersion.use_as_ByteSeq()
-            Check(Or(*(self._nVersion.as_ByteSeq() == IntSeqVal(struct.pack('<i', v))
-                       for v in POSSIBLE_TX_VERSIONS)))
+            if not cur_env().is_miner:
+                Check(Or(*(self._nVersion.as_ByteSeq() == IntSeqVal(struct.pack('<i', v))
+                           for v in STANDARD_TX_VERSIONS)))
 
         return self._nVersion
 

@@ -1,5 +1,9 @@
 # B'SST release notes
 
+Version 0.1.3.dev0
+
+Fix transaction version restriction: standard transaction versions are currenlty only 1 or 2, and for miner mode, transaction versions are not restricted at all
+
 Version 0.1.2
 
 * Rework plugin system, now plugins are 'general' in a sense that they can hook into different stages of analysis to observe or change various things. Please look at `plugins` directory for details
