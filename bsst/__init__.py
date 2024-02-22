@@ -3354,8 +3354,11 @@ def add_checksigfromstack_arg_constraints(
           err_known_result_different_args())
 
 
-def add_scriptpubkey_constraints(*, witver: 'SymData', witprog: 'SymData'
-                                 ) -> None:
+def add_introspected_scriptpubkey_constraints(
+    *, witver: 'SymData', witprog: 'SymData', is_input: bool
+) -> None:
+
+    env = cur_env()
 
     wv = witver.as_ByteSeq()[0]
     # 0x81 is scriptnum -1
@@ -3369,6 +3372,14 @@ def add_scriptpubkey_constraints(*, witver: 'SymData', witprog: 'SymData'
     Check(And(witprog.Length() >= 2, witprog.Length() <= 40))
     Check(Implies(wv == -1, witprog.Length() == 32))
     Check(Implies(witprog.Length() != 32, wv != -1))
+
+    if not env.is_miner and is_input:
+        Check(Implies(wv == 0, Or(witprog.Length() == 32,
+                                  witprog.Length() == 20)))
+        # Condition check in VerifyWitnessProgram() checks for is_p2sh,
+        # but in Elements spk introspection, wv will be -1 for p2sh,
+        # so we can be sure that this implication always holds
+        Check(Implies(wv == 1, witprog.Length() == 32))
 
 
 def add_op_lshift_constraints(
@@ -8394,7 +8405,8 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                     assert got_witver
                 else:
                     assert not got_witver
-                    add_scriptpubkey_constraints(witver=witver, witprog=witprog)
+                    add_introspected_scriptpubkey_constraints(
+                        witver=witver, witprog=witprog, is_input=True)
 
                 z3check()
 
@@ -8655,7 +8667,8 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                     assert got_witver
                 else:
                     assert not got_witver
-                    add_scriptpubkey_constraints(witver=witver, witprog=witprog)
+                    add_introspected_scriptpubkey_constraints(
+                        witver=witver, witprog=witprog, is_input=False)
 
                 z3check()
 
