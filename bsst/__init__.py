@@ -5493,7 +5493,7 @@ class SymData:
         else:
             self._unique_name = unique_name
 
-        if witness_number:
+        if witness_number is not None:
             Check(self.Length() <= MAX_SCRIPT_ELEMENT_SIZE)
 
         if static_value is not None:
