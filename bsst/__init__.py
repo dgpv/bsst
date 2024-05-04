@@ -869,6 +869,19 @@ class SymEnvironment:
         self._tag_enforcements_with_position = value
 
     @property
+    def tag_branches_with_position(self) -> bool:
+        """If true, each branch path will be tagged with the value of program
+        counter at the time the branch was created. This will make the
+        analysis treat such paths as unique, even if the branch conditions
+        might be the same
+        """
+        return self._tag_branches_with_position
+
+    @tag_branches_with_position.setter
+    def tag_branches_with_position(self, value: bool) -> None:
+        self._tag_branches_with_position = value
+
+    @property
     def use_deterministic_arguments_order(self) -> bool:
         """If true, the opcodes where the order of arguments is not important
         will have their arguments sorted according to their canonical
@@ -1209,6 +1222,7 @@ class SymEnvironment:
         self._tag_data_with_position = False
         self._use_deterministic_arguments_order = True
         self._tag_enforcements_with_position = True
+        self._tag_branches_with_position = True
         self._mark_path_local_always_true_enforcements = True
         self._minimalif_flag = True
         self._minimaldata_flag = True
@@ -3892,6 +3906,18 @@ def non_static_value_error(msg: str) -> NoReturn:
     raise ValueError(f'non-static value: {msg}')
 
 
+def get_timeline_strings_for_path(path: Iterable['Branchpoint'] = (),
+                                  force_tag_with_position: bool = False
+                                  ) -> list[str]:
+    result: list[str] = []
+    for i, bp in enumerate(path):
+        result.append(
+            bp.repr_for_path(force_tag_with_position=force_tag_with_position,
+                             prefix='When ' if i == 0 else ' And '))
+
+    return result
+
+
 def scriptnum_to_integer(v: bytes, max_size: int = SCRIPTNUM_DEFAULT_SIZE
                          ) -> int:
     if len(v) > max_size:
@@ -3931,13 +3957,16 @@ class Branchpoint:
     context: Optional['ExecContext']
 
     def __init__(self, *, pc: int,
-                 cond: Optional[Union['SymData', tuple['SymData', ...]]] = None,
+                 cond: Optional['SymData'] = None,
                  designation: str = '', branch_index: int,
                  parent: Optional['Branchpoint'] = None,
                  context: Optional['ExecContext'] = None) -> None:
 
         if context:
             context.branchpoint = self
+
+        if cond is None and pc != 0:
+            raise ValueError('cond must be supplied for non-root branch')
 
         if cond and not designation:
             raise ValueError('designation must be supplied with cond')
@@ -3994,17 +4023,28 @@ class Branchpoint:
 
         return tuple(reversed(result))
 
-    def repr_for_path(self) -> str:
+    def repr_for_path(self, force_tag_with_position: bool = False,
+                      prefix: str = 'When ') -> str:
         with CurrentExecContext(self.cond_context):
-            cond = f' {self.cond}' if self.cond else ''
+            if self.cond:
+                cond_str = f'{self.cond}'
+            else:
+                assert self.pc == 0
+                cond_str = '<root>'
 
-        return (f'{cur_env().script_info.body[self.pc]}{cond} @ {op_pos_info(self.pc)} : '
-                f'{self.designation}')
+        result_str = f'{prefix}{cond_str} {self.designation}'
+
+        if cur_env().tag_branches_with_position or force_tag_with_position:
+            return (f'{result_str} :: '
+                    f'[{cur_env().script_info.body[self.pc]} @ {op_pos_info(self.pc)}]')
+
+        return result_str
 
     def get_timeline_strings(self, *, skip_failed_branches: bool = True
                              ) -> list[str]:
-        return [bp.repr_for_path() for bp in
-                self.get_path(skip_failed_branches=skip_failed_branches)]
+        return get_timeline_strings_for_path(
+            self.get_path(skip_failed_branches=skip_failed_branches),
+            force_tag_with_position=True)
 
     def get_enforcement_path(self, e: "Enforcement") -> tuple['Branchpoint', ...]:
         result: list[Branchpoint] = []
@@ -5150,8 +5190,7 @@ class ExecContext(SupportsFailureCodeCallbacks):
         return self._plugin_data[pname]
 
     def branch(self: T_ExecContext, *,
-               cond: Optional[Union['SymData', tuple['SymData', ...]]] = None,
-               cond_designations: tuple[str, ...] = ('True', 'False')
+               cond: 'SymData', cond_designations: tuple[str, ...]
                ) -> tuple[T_ExecContext, ...]:
 
         assert len(set(cond_designations)) == len(cond_designations)
@@ -5229,20 +5268,17 @@ class ExecContext(SupportsFailureCodeCallbacks):
 
         possible_args.sort()
 
-        arg_prefix = f'{arg_name} = ' if arg_name else ''
-
-        designations = [f'{arg_prefix}{value_common_repr(arg)}'
+        as_name = f' as {arg_name}' if arg_name else ''
+        designations = [f'= {value_common_repr(arg)}{as_name}'
                         for arg in possible_args[:max_samples]]
 
         if bool(possible_args[max_samples:]):
             unexplored_str = ", ".join(value_common_repr(arg)
                                        for arg in possible_args[max_samples:])
-            arg_prefix = f'{arg_name} : ' if arg_name else ''
             designations.append(
-                f'{arg_prefix}{unexplored_str}, ...')
+                f'= {unexplored_str}, ...{as_name}')
 
-        cond = sd if set_branch_cond else None
-        contexts = self.branch(cond=cond, cond_designations=tuple(designations))
+        contexts = self.branch(cond=sd, cond_designations=tuple(designations))
 
         assert contexts[0] == self
         for i in range(1, max_samples):
@@ -6931,6 +6967,8 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                 # do this before branch() so any z3 constraints that is
                 # added will be present in the previous constraint frame
                 if env.minimalif_flag:
+                    cond_designations = ('= 1', '= 0')
+                    branch_cond = cond
                     cond_int = cond.use_as_Int()
 
                     if not isinstance(cond_int, int) and \
@@ -6944,6 +6982,8 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                         cond_int = int(cond.known_bool_value)
                 else:
                     cond_int = use_as_script_bool(cond)
+                    cond_designations = ('is True', 'is False')
+                    branch_cond = SymData(name='BOOL', args=(cond,))
 
                 if isinstance(cond, int):
                     fValue = bool(cond_int)
@@ -6951,13 +6991,15 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                     fValue = True
 
                 if op == OP_IF:
-                    _, new_context = ctx.branch(cond=cond)
-                else:
+                    _, new_context = ctx.branch(
+                        cond=branch_cond, cond_designations=cond_designations)
+                elif op == OP_NOTIF:
                     fValue = not fValue
                     _, new_context = ctx.branch(
-                        cond=cond,
-                        cond_designations=('False', 'True')
-                    )
+                        cond=branch_cond,
+                        cond_designations=tuple(reversed(cond_designations)))
+                else:
+                    assert False, "unexpected op"
 
                 def fail_on_invalid_cond() -> None:
                     expected_cond_int = int(not fValue)
@@ -7109,7 +7151,9 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
             cond = stacktop(-1)
 
-            _, new_context = ctx.branch(cond=cond)
+            _, new_context = ctx.branch(
+                cond=SymData(name='BOOL', args=(cond,)),
+                cond_designations=('is True', 'is False'))
 
             new_context.run_on_start(
                 lambda: Check(use_as_script_bool(cond) == 0,
@@ -8504,8 +8548,8 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
                     if not should_skip_immediately_failed_branch():
                         _, new_context = ctx.branch(
-                            cond=bn,
-                            cond_designations=('Has issuance', 'No issuance')
+                            cond=SymData(name='INPUT', args=(bn,)),
+                            cond_designations=('has issuance', 'has no issuance')
                         )
 
                         fflag = SymData(name=f'{op.name}_FAILURE_FLAG')
@@ -8760,8 +8804,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
             if not should_skip_immediately_failed_branch():
                 _, new_context = ctx.branch(
-                    cond=(vcha, vchb),
-                    cond_designations=('Success branch', 'Failure branch')
+                    cond=r, cond_designations=('is valid', 'is invalid')
                 )
                 new_context.run_on_start(lambda: new_context.push(r_sf))
                 new_context.run_on_start(
@@ -8805,8 +8848,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
             if not should_skip_immediately_failed_branch():
                 _, new_context = ctx.branch(
-                    cond=(vcha, vchb),
-                    cond_designations=('Success branch', 'Failure branch')
+                    cond=res, cond_designations=('is valid', 'is invalid')
                 )
                 new_context.run_on_start(lambda: new_context.push(res_sf))
                 new_context.run_on_start(
@@ -8897,8 +8939,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
             if not should_skip_immediately_failed_branch():
                 _, new_context = ctx.branch(
-                    cond=vcha,
-                    cond_designations=('Success branch', 'Failure branch')
+                    cond=r, cond_designations=('is valid', 'is invalid')
                 )
                 new_context.run_on_start(lambda: new_context.push(r_sf))
                 new_context.run_on_start(
@@ -9967,8 +10008,9 @@ def report() -> None:  # noqa
 
     with VarnamesDisplay():
         for path in valid_paths:
-            print_as_header([bp.repr_for_path() for bp in path] or "[Root]",
-                            level=1)
+            print_as_header(
+                get_timeline_strings_for_path(path, force_tag_with_position=True) or "[Root]",
+                level=1)
 
     if valid_paths:
         if paths:
@@ -9979,7 +10021,7 @@ def report() -> None:  # noqa
     with VarnamesDisplay():
         for path in paths:
             if path:
-                print_as_header([bp.repr_for_path() for bp in path], level=1)
+                print_as_header(get_timeline_strings_for_path(path), level=1)
             else:
                 print_as_header("All valid paths:", level=1)
 
@@ -9999,7 +10041,7 @@ def report() -> None:  # noqa
         for bp in bps_with_uvs:
             path = bp.get_path()
             if path:
-                print_as_header([bp.repr_for_path() for bp in path], level=1)
+                print_as_header(get_timeline_strings_for_path(path), level=1)
             else:
                 print_as_header("All valid paths:", level=1)
 
@@ -10015,7 +10057,9 @@ def report() -> None:  # noqa
     for bp in bps_with_mvr:
         path = bp.get_path()
         if path:
-            print_as_header([bp.repr_for_path() for bp in path], level=1)
+            print_as_header(
+                get_timeline_strings_for_path(path, force_tag_with_position=True),
+                level=1)
         else:
             print_as_header("All valid paths:", level=1)
 
