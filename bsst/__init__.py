@@ -4180,28 +4180,31 @@ class Branchpoint:
             if e1 in common_enforcements:
                 e1.add_dataref_aliases(e2)
 
-        for bp in valid_branches:
-            bp.enforcements_intersection = [
-                e for e in bp.enforcements_intersection
-                if e not in common_enforcements
-            ]
-            for name, mvrdict in common_mvr.items():
-                bp_mvrdict = bp.model_value_repr_intersection.get(name, {})
-                common_value = mvrdict.get(MVINFO_TYPE_VALUE)
-                bp_value = bp_mvrdict.get(MVINFO_TYPE_VALUE)
-                common_datarefs = mvrdict.get(MVINFO_TYPE_DATAREF)
-                bp_daterefs = bp_mvrdict.get(MVINFO_TYPE_DATAREF)
-                if common_value != bp_value or common_datarefs != bp_daterefs:
-                    # if main value lines or dataref lines are not common,
-                    # leave sizes, etc. in the child bp too
-                    pass
-                else:
-                    for mvrtype in model_value_info_types:
-                        if mvrdict.get(mvrtype) == bp_mvrdict.get(mvrtype):
-                            bp_mvrdict.pop(mvrtype, None)
+        if len(valid_branches) == 1:
+            valid_branches[0].model_value_repr_intersection.clear()
+        else:
+            for bp in valid_branches:
+                bp.enforcements_intersection = [
+                    e for e in bp.enforcements_intersection
+                    if e not in common_enforcements
+                ]
+                for name, mvrdict in common_mvr.items():
+                    bp_mvrdict = bp.model_value_repr_intersection.get(name, {})
+                    common_value = mvrdict.get(MVINFO_TYPE_VALUE)
+                    bp_value = bp_mvrdict.get(MVINFO_TYPE_VALUE)
+                    common_datarefs = mvrdict.get(MVINFO_TYPE_DATAREF)
+                    bp_daterefs = bp_mvrdict.get(MVINFO_TYPE_DATAREF)
+                    if common_value != bp_value or common_datarefs != bp_daterefs:
+                        # if main value lines or dataref lines are not common,
+                        # leave sizes, etc. in the child bp too
+                        pass
+                    else:
+                        for mvrtype in model_value_info_types:
+                            if mvrdict.get(mvrtype) == bp_mvrdict.get(mvrtype):
+                                bp_mvrdict.pop(mvrtype, None)
 
-                    if not bp_mvrdict.values():
-                        bp.model_value_repr_intersection.pop(name, None)
+                        if not bp_mvrdict.values():
+                            bp.model_value_repr_intersection.pop(name, None)
 
         self.seen_enforcement_strings = seen_enforcements_set
         self.model_value_repr_intersection = common_mvr
