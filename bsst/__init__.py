@@ -9728,8 +9728,9 @@ def _finalize(ctx: ExecContext, env: SymEnvironment) -> None:  # noqa
 
     if env.log_progress:
         print_as_header("Finalizing path", is_solving=True)
-        print_as_header(ctx.get_timeline_strings() or ["[Root]"],
-                        level=1, is_solving=True, no_empty_line_above=True)
+        print_as_header(
+            ctx.get_timeline_strings(skip_failed_branches=False) or ["[Root]"],
+            level=1, is_solving=True, no_empty_line_above=True)
 
     try:
         mvdict = z3check(force_check=True,
