@@ -3960,6 +3960,7 @@ class Branchpoint:
             str, dict[str, ModelValueInfo]
         ] = {}
         self.enforcements_intersection: list['Enforcement'] = []
+        self.unused_values_intersection: list[str] = []
         self.seen_enforcement_strings: set[str] = set()
 
     def get_valid_branches(self) -> tuple['Branchpoint', ...]:
@@ -4094,31 +4095,6 @@ class Branchpoint:
                 for e, _ in enfs:
                     e.is_always_true_global = e.is_always_true_in_path
 
-    def process_unused_values(self
-                              ) -> dict[str, tuple['SymData', 'ExecContext']]:
-        uvdict: dict[str, tuple['SymData', 'ExecContext']] = {}
-        if self.context:
-            assert not self.context.failure
-            with CurrentExecContext(self.context):
-                for uv in self.context.unused_values:
-                    uvdict[uv.canonical_repr()] = (uv, self.context)
-
-            return uvdict
-
-        assert self._branches
-        valid_branches = self.get_valid_branches()
-
-        if not valid_branches:
-            return {}
-
-        uvdict = valid_branches[0].process_unused_values()
-
-        crset = set(uvdict.keys())
-        for bp in valid_branches[1:]:
-            crset -= set(bp.process_unused_values().keys())
-
-        return {k: uvdict[k] for k in crset}
-
     def process_child_data_intersections(self) -> None:  # noqa
 
         if self.context:
@@ -4127,7 +4103,16 @@ class Branchpoint:
                 e.to_string(tag_with_position=True, is_canonical=True)
                 for e in self.context.enforcements
             )
+
             self.enforcements_intersection = self.context.enforcements.copy()
+
+            with VarnamesDisplay():
+                with CurrentExecContext(self.context):
+                    self.unused_values_intersection = [
+                        f'{uv} from {op_pos_info(uv.src_pc)}'
+                        for uv in self.context.unused_values
+                    ]
+
             self.model_value_repr_intersection = \
                 deepcopy(self.context.model_value_repr_dict)
             return
@@ -4145,8 +4130,10 @@ class Branchpoint:
 
         possible_aliases: list[tuple[Enforcement, Enforcement]] = []
         common_enf_difference: set[Enforcement] = set()
+        common_uv_difference: set[str] = set()
         seen_enforcements_set = valid_branches[0].seen_enforcement_strings.copy()
         common_enforcements = valid_branches[0].enforcements_intersection.copy()
+        common_unused_values = valid_branches[0].unused_values_intersection.copy()
         common_mvr = deepcopy(valid_branches[0].model_value_repr_intersection)
 
         for bp in valid_branches[1:]:
@@ -4162,6 +4149,10 @@ class Branchpoint:
                 else:
                     common_enf_difference.add(e1)
 
+            for uv_str in common_unused_values:
+                if uv_str not in bp.unused_values_intersection:
+                    common_uv_difference.add(uv_str)
+
             for name, mvrdict in common_mvr.items():
                 bp_mvrdict = bp.model_value_repr_intersection.get(name, {})
                 for mvrtype in model_value_info_types:
@@ -4176,18 +4167,27 @@ class Branchpoint:
         common_enforcements = [e for e in common_enforcements
                                if e not in common_enf_difference]
 
+        common_unused_values = [uvs for uvs in common_unused_values
+                                if uvs not in common_uv_difference]
+
         for e1, e2 in possible_aliases:
             if e1 in common_enforcements:
                 e1.add_dataref_aliases(e2)
 
         if len(valid_branches) == 1:
             valid_branches[0].model_value_repr_intersection.clear()
+            valid_branches[0].unused_values_intersection.clear()
         else:
             for bp in valid_branches:
                 bp.enforcements_intersection = [
                     e for e in bp.enforcements_intersection
                     if e not in common_enforcements
                 ]
+
+                for bp_uv_str in bp.unused_values_intersection:
+                    if bp_uv_str in common_unused_values:
+                        bp.unused_values_intersection.remove(bp_uv_str)
+
                 for name, mvrdict in common_mvr.items():
                     bp_mvrdict = bp.model_value_repr_intersection.get(name, {})
                     common_value = mvrdict.get(MVINFO_TYPE_VALUE)
@@ -4207,6 +4207,7 @@ class Branchpoint:
                             bp.model_value_repr_intersection.pop(name, None)
 
         self.seen_enforcement_strings = seen_enforcements_set
+        self.unused_values_intersection = common_unused_values
         self.model_value_repr_intersection = common_mvr
 
         # when tag_enforcements_with_position is false,
@@ -9893,20 +9894,18 @@ def report() -> None:  # noqa
                                set['Enforcement']] = {}
 
     bps_with_mvr: list['Branchpoint'] = []
+    bps_with_uvs: list['Branchpoint'] = []
 
     # model_values_map: dict[tuple[int, tuple[str, ...]],
     #                        list['ExecContext']] = {}
 
     nonmodel_stack: list[SymData]
 
-    unused_value_dict: dict[str, tuple['SymData', 'ExecContext']] = {}
-
     root_bp = env.get_root_branch()
 
     if not root_bp.context or not root_bp.context.failure:
         root_bp.process_always_true_enforcements()
         root_bp.process_child_data_intersections()
-        unused_value_dict = root_bp.process_unused_values()
 
     if env.log_solving_attempts:
         env.solving_log_ensure_empty_line()
@@ -9942,6 +9941,9 @@ def report() -> None:  # noqa
 
         if bp.model_value_repr_intersection.values():
             bps_with_mvr.append(bp)
+
+        if bp.unused_values_intersection:
+            bps_with_uvs.append(bp)
 
     root_bp.walk_branches(process_enf_paths)
 
@@ -9991,20 +9993,18 @@ def report() -> None:  # noqa
 
     env.ensure_empty_line()
 
-    if unused_value_dict:
+    if bps_with_uvs:
+        bps_with_uvs.sort(key=Branchpoint.tuple_for_sort)
         print_as_header('Unused values:')
-        with VarnamesDisplay():
-            uvset: set[tuple[str, int]] = set()
-            for uv, ctx in unused_value_dict.values():
-                with CurrentExecContext(ctx):
-                    uvset.add((f'{uv}', uv.src_pc))
+        for bp in bps_with_uvs:
+            path = bp.get_path()
+            if path:
+                print_as_header([bp.repr_for_path() for bp in path], level=1)
+            else:
+                print_as_header("All valid paths:", level=1)
 
-            env.ensure_empty_line()
-
-            combined_uvs = list(uvset)
-            combined_uvs.sort(key=lambda v: v[1])
-            for uvstr, src_pc in combined_uvs:
-                env.write_line(f'{INDENT}{uvstr} from {op_pos_info(src_pc)}')
+            for uv_str in bp.unused_values_intersection:
+                env.write_line(f'{INDENT}{uv_str}')
 
     if env.produce_model_values:
         print_as_header('Witness usage and model values:')

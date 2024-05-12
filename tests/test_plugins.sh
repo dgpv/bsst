@@ -278,6 +278,8 @@ All valid paths:
 Unused values:
 ==============
 
+All valid paths:
+----------------
         CHECKSIGADD(\$e, CHECKSIGADD(\$c, CHECKSIGADD(\$a, 0, \$b), \$d), \$f) from 13:L1
 
 =================================

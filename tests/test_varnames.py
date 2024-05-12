@@ -274,6 +274,15 @@ IF wit0 @ 0:L1 : False
 
         NOT(&{b;c}) @ END
 
+==============
+Unused values:
+==============
+
+IF wit0 @ 0:L1 : True
+IF wit1 @ 5:L3 : False
+----------------------
+        &a from 3:L2
+
 =================================
 Witness usage and stack contents:
 =================================
