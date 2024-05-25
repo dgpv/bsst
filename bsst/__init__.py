@@ -4252,7 +4252,7 @@ class Branchpoint:
 
         # when tag_enforcements_with_position is false,
         # common_enforcements might contain duplicates even now
-        self.enforcements_intersection = []
+        enforcements_intersection = []
         for e1 in common_enforcements:
             for e2 in self.enforcements_intersection:
                 if e1 == e2:
@@ -4262,7 +4262,9 @@ class Branchpoint:
                     e2.add_dataref_aliases(e1)
                     break
             else:
-                self.enforcements_intersection.append(e1)
+                enforcements_intersection.append(e1)
+
+        self.enforcements_intersection = enforcements_intersection
 
     @classmethod
     def tuple_for_sort(cls, bp: 'Branchpoint') -> tuple[int, ...]:
