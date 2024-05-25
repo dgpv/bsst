@@ -10059,9 +10059,10 @@ def report() -> None:  # noqa
     for bp in bps_with_mvr:
         path = bp.get_path()
         if path:
-            print_as_header(
-                get_timeline_strings_for_path(path, force_tag_with_position=True),
-                level=1)
+            with VarnamesDisplay():
+                print_as_header(
+                    get_timeline_strings_for_path(path, force_tag_with_position=True),
+                    level=1)
         else:
             print_as_header("All valid paths:", level=1)
 
