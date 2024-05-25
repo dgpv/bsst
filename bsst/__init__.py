@@ -4217,6 +4217,7 @@ class Branchpoint:
         if len(valid_branches) == 1:
             valid_branches[0].model_value_repr_intersection.clear()
             valid_branches[0].unused_values_intersection.clear()
+            valid_branches[0].enforcements_intersection.clear()
         else:
             for bp in valid_branches:
                 bp.enforcements_intersection = [
