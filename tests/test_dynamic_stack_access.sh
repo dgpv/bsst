@@ -26,11 +26,11 @@ NOTE: There are execution paths that was not explored
 Valid paths:
 ============
 
-PICK wit0 @ 0:L1 : 0
---------------------
+When wit0 = 0 :: [PICK @ 0:L1]
+------------------------------
 
-PICK wit0 @ 0:L1 : 1
---------------------
+When wit0 = 1 :: [PICK @ 0:L1]
+------------------------------
 
 =======================
 No enforced constraints
@@ -40,8 +40,8 @@ No enforced constraints
 Witness usage and model values:
 ===============================
 
-PICK wit0 @ 0:L1 : 0
---------------------
+When wit0 = 0 :: [PICK @ 0:L1]
+------------------------------
 Witnesses used: 2
 
 Model values:
@@ -52,8 +52,8 @@ Stack values:
         stack[-1] = wit1 : ...
         stack[-2] = wit1 : ...
 
-PICK wit0 @ 0:L1 : 1
---------------------
+When wit0 = 1 :: [PICK @ 0:L1]
+------------------------------
 Witnesses used: 3
 
 Model values:
@@ -70,8 +70,8 @@ Stack values:
 Failures per path:
 ==================
 
-PICK wit0 @ 0:L1 : 2, ...
--------------------------
+When wit0 = 2, ... :: [PICK @ 0:L1]
+-----------------------------------
 The path was not explored
 
 END
@@ -90,11 +90,11 @@ NOTE: There are execution paths that was not explored
 Valid paths:
 ============
 
-ROLL wit0 @ 0:L1 : 0
---------------------
+When wit0 = 0 :: [ROLL @ 0:L1]
+------------------------------
 
-ROLL wit0 @ 0:L1 : 1
---------------------
+When wit0 = 1 :: [ROLL @ 0:L1]
+------------------------------
 
 =======================
 No enforced constraints
@@ -104,8 +104,8 @@ No enforced constraints
 Witness usage and model values:
 ===============================
 
-ROLL wit0 @ 0:L1 : 0
---------------------
+When wit0 = 0 :: [ROLL @ 0:L1]
+------------------------------
 Witnesses used: 2
 
 Model values:
@@ -115,8 +115,8 @@ Model values:
 Stack values:
         stack[-1] = wit1 : ...
 
-ROLL wit0 @ 0:L1 : 1
---------------------
+When wit0 = 1 :: [ROLL @ 0:L1]
+------------------------------
 Witnesses used: 3
 
 Model values:
@@ -132,8 +132,8 @@ Stack values:
 Failures per path:
 ==================
 
-ROLL wit0 @ 0:L1 : 2, ...
--------------------------
+When wit0 = 2, ... :: [ROLL @ 0:L1]
+-----------------------------------
 The path was not explored
 
 END
@@ -148,14 +148,14 @@ cat >${TESTEXPECTED} <<END
 Valid paths:
 ============
 
-PICK &a @ 5:L3 : 1
-------------------
+When &a = 1 :: [PICK @ 5:L3]
+----------------------------
 
-PICK &a @ 5:L3 : 2
-------------------
+When &a = 2 :: [PICK @ 5:L3]
+----------------------------
 
-PICK &a @ 5:L3 : 3
-------------------
+When &a = 3 :: [PICK @ 5:L3]
+----------------------------
 
 ==============================
 Enforced constraints per path:
@@ -176,8 +176,8 @@ All valid paths:
 Model values:
         wit0 = &a : ...
 
-PICK wit0 @ 5:L3 : 1
---------------------
+When &a = 1 :: [PICK @ 5:L3]
+----------------------------
 Witnesses used: 3
 
 Model values:
@@ -190,8 +190,8 @@ Stack values:
         stack[-2] = wit1 : ...
         stack[-3] = wit2 : ...
 
-PICK wit0 @ 5:L3 : 2
---------------------
+When &a = 2 :: [PICK @ 5:L3]
+----------------------------
 Witnesses used: 4
 
 Model values:
@@ -206,8 +206,8 @@ Stack values:
         stack[-3] = wit2 : ...
         stack[-4] = wit3 : ...
 
-PICK wit0 @ 5:L3 : 3
---------------------
+When &a = 3 :: [PICK @ 5:L3]
+----------------------------
 Witnesses used: 5
 
 Model values:
@@ -248,14 +248,14 @@ cat >${TESTEXPECTED} <<END
 Valid paths:
 ============
 
-ROLL &a @ 5:L3 : 1
-------------------
+When &a = 1 :: [ROLL @ 5:L3]
+----------------------------
 
-ROLL &a @ 5:L3 : 2
-------------------
+When &a = 2 :: [ROLL @ 5:L3]
+----------------------------
 
-ROLL &a @ 5:L3 : 3
-------------------
+When &a = 3 :: [ROLL @ 5:L3]
+----------------------------
 
 ==============================
 Enforced constraints per path:
@@ -276,8 +276,8 @@ All valid paths:
 Model values:
         wit0 = &a : ...
 
-ROLL wit0 @ 5:L3 : 1
---------------------
+When &a = 1 :: [ROLL @ 5:L3]
+----------------------------
 Witnesses used: 3
 
 Model values:
@@ -289,8 +289,8 @@ Stack values:
         stack[-1] = wit2 : ...
         stack[-2] = wit1 : ...
 
-ROLL wit0 @ 5:L3 : 2
---------------------
+When &a = 2 :: [ROLL @ 5:L3]
+----------------------------
 Witnesses used: 4
 
 Model values:
@@ -304,8 +304,8 @@ Stack values:
         stack[-2] = wit1 : ...
         stack[-3] = wit2 : ...
 
-ROLL wit0 @ 5:L3 : 3
---------------------
+When &a = 3 :: [ROLL @ 5:L3]
+----------------------------
 Witnesses used: 5
 
 Model values:
@@ -349,16 +349,16 @@ NOTE: There are execution paths that was not explored
 Valid paths:
 ============
 
-CHECKMULTISIG @ 0:L1 : num_keys = 0
------------------------------------
+When wit0 = 0 as num_keys :: [CHECKMULTISIG @ 0:L1]
+---------------------------------------------------
 
-CHECKMULTISIG @ 0:L1 : num_keys = 1
-CHECKMULTISIG @ 0:L1 : num_signatures = 0
------------------------------------------
+When wit0 = 1 as num_keys :: [CHECKMULTISIG @ 0:L1]
+ And wit2 = 0 as num_signatures :: [CHECKMULTISIG @ 0:L1]
+---------------------------------------------------------
 
-CHECKMULTISIG @ 0:L1 : num_keys = 1
-CHECKMULTISIG @ 0:L1 : num_signatures = 1
------------------------------------------
+When wit0 = 1 as num_keys :: [CHECKMULTISIG @ 0:L1]
+ And wit2 = 1 as num_signatures :: [CHECKMULTISIG @ 0:L1]
+---------------------------------------------------------
 
 =======================
 No enforced constraints
@@ -368,8 +368,8 @@ No enforced constraints
 Witness usage and model values:
 ===============================
 
-CHECKMULTISIG @ 0:L1 : num_keys = 0
------------------------------------
+When wit0 = 0 as num_keys :: [CHECKMULTISIG @ 0:L1]
+---------------------------------------------------
 Witnesses used: 3
 
 Model values:
@@ -377,15 +377,15 @@ Model values:
 Stack values:
         stack[-1] = CHECKMULTISIG(wit0, wit1) = 1
 
-CHECKMULTISIG @ 0:L1 : num_keys = 1
------------------------------------
+When wit0 = 1 as num_keys :: [CHECKMULTISIG @ 0:L1]
+---------------------------------------------------
 
 Model values:
         wit0 = 1
 
-CHECKMULTISIG @ 0:L1 : num_keys = 1
-CHECKMULTISIG @ 0:L1 : num_signatures = 0
------------------------------------------
+When wit0 = 1 as num_keys :: [CHECKMULTISIG @ 0:L1]
+ And wit2 = 0 as num_signatures :: [CHECKMULTISIG @ 0:L1]
+---------------------------------------------------------
 Witnesses used: 4
 
 Model values:
@@ -393,9 +393,9 @@ Model values:
 Stack values:
         stack[-1] = CHECKMULTISIG(wit0, wit1, wit2) = 1
 
-CHECKMULTISIG @ 0:L1 : num_keys = 1
-CHECKMULTISIG @ 0:L1 : num_signatures = 1
------------------------------------------
+When wit0 = 1 as num_keys :: [CHECKMULTISIG @ 0:L1]
+ And wit2 = 1 as num_signatures :: [CHECKMULTISIG @ 0:L1]
+---------------------------------------------------------
 Witnesses used: 5
 
 Model values:
@@ -408,8 +408,8 @@ Stack values:
 Failures per path:
 ==================
 
-CHECKMULTISIG @ 0:L1 : num_keys : 2, ...
-----------------------------------------
+When wit0 = 2, ... as num_keys :: [CHECKMULTISIG @ 0:L1]
+--------------------------------------------------------
 The path was not explored
 
 END
@@ -424,11 +424,11 @@ cat >${TESTEXPECTED} <<END
 Valid paths:
 ============
 
-CHECKMULTISIG @ 1:L1 : num_signatures = 0
------------------------------------------
+When wit1 = 0 as num_signatures :: [CHECKMULTISIG @ 1:L1]
+---------------------------------------------------------
 
-CHECKMULTISIG @ 1:L1 : num_signatures = 1
------------------------------------------
+When wit1 = 1 as num_signatures :: [CHECKMULTISIG @ 1:L1]
+---------------------------------------------------------
 
 =======================
 No enforced constraints
@@ -438,8 +438,8 @@ No enforced constraints
 Witness usage and model values:
 ===============================
 
-CHECKMULTISIG @ 1:L1 : num_signatures = 0
------------------------------------------
+When wit1 = 0 as num_signatures :: [CHECKMULTISIG @ 1:L1]
+---------------------------------------------------------
 Witnesses used: 3
 
 Model values:
@@ -447,8 +447,8 @@ Model values:
 Stack values:
         stack[-1] = CHECKMULTISIG(1, wit0, wit1) = 1
 
-CHECKMULTISIG @ 1:L1 : num_signatures = 1
------------------------------------------
+When wit1 = 1 as num_signatures :: [CHECKMULTISIG @ 1:L1]
+---------------------------------------------------------
 Witnesses used: 4
 
 Model values:
@@ -469,11 +469,11 @@ cat >${TESTEXPECTED} <<END
 Valid paths:
 ============
 
-PICK \$a @ 1:L2 : x('0000')
---------------------------
+When \$a = x('0000') :: [PICK @ 1:L2]
+------------------------------------
 
-PICK \$a @ 1:L2 : x('0100')
---------------------------
+When \$a = x('0100') :: [PICK @ 1:L2]
+------------------------------------
 
 =======================
 No enforced constraints
@@ -483,8 +483,8 @@ No enforced constraints
 Witness usage and model values:
 ===============================
 
-PICK \$a @ 1:L2 : x('0000')
---------------------------
+When \$a = x('0000') :: [PICK @ 1:L2]
+------------------------------------
 Witnesses used: 1
 
 Model values:
@@ -495,8 +495,8 @@ Stack values:
         stack[-1] = wit0 : ...
         stack[-2] = wit0 : ...
 
-PICK \$a @ 1:L2 : x('0100')
---------------------------
+When \$a = x('0100') :: [PICK @ 1:L2]
+------------------------------------
 Witnesses used: 2
 
 Model values:

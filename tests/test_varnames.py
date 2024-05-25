@@ -49,11 +49,11 @@ erstr = """
 Valid paths:
 ============
 
-IF wit0 @ 9:L10 : True
-----------------------
+When wit0 = 1 :: [IF @ 9:L10]
+-----------------------------
 
-IF wit0 @ 9:L10 : False
------------------------
+When wit0 = 0 :: [IF @ 9:L10]
+-----------------------------
 
 ==============================
 Enforced constraints per path:
@@ -67,13 +67,13 @@ All valid paths:
         BOOL(&b4) @ 24:L25
         1 @ END
 
-IF wit0 @ 9:L10 : True
-----------------------
+When wit0 = 1 :: [IF @ 9:L10]
+-----------------------------
 
         BOOL(&z) @ 13:L14
 
-IF wit0 @ 9:L10 : False
------------------------
+When wit0 = 0 :: [IF @ 9:L10]
+-----------------------------
 
         BOOL(&b2) @ 18:L19
 
@@ -110,11 +110,11 @@ expected_result.append("""
 Valid paths:
 ============
 
-IF wit0 @ 9:L10 : True
-----------------------
+When wit0 = 1 :: [IF @ 9:L10]
+-----------------------------
 
-IF wit0 @ 9:L10 : False
------------------------
+When wit0 = 0 :: [IF @ 9:L10]
+-----------------------------
 
 ==============================
 Enforced constraints per path:
@@ -128,13 +128,13 @@ All valid paths:
         BOOL(&b4) @ 24:L25
         1 @ END
 
-IF wit0 @ 9:L10 : True
-----------------------
+When wit0 = 1 :: [IF @ 9:L10]
+-----------------------------
 
         BOOL(&z) @ 13:L14
 
-IF wit0 @ 9:L10 : False
------------------------
+When wit0 = 0 :: [IF @ 9:L10]
+-----------------------------
 
         BOOL(&b2) @ 18:L19
 
@@ -168,23 +168,23 @@ erstr = """
 Valid paths:
 ============
 
-IF wit0 @ 0:L1 : True
----------------------
+When wit0 = 1 :: [IF @ 0:L1]
+----------------------------
 
-IF wit0 @ 0:L1 : False
-----------------------
+When wit0 = 0 :: [IF @ 0:L1]
+----------------------------
 
 ==============================
 Enforced constraints per path:
 ==============================
 
-IF wit0 @ 0:L1 : True
----------------------
+When wit0 = 1 :: [IF @ 0:L1]
+----------------------------
 
         &x @ END
 
-IF wit0 @ 0:L1 : False
-----------------------
+When wit0 = 0 :: [IF @ 0:L1]
+----------------------------
 
         BOOL(&x') @ END
 
@@ -196,15 +196,15 @@ All valid paths:
 ----------------
 Witnesses used: 1
 
-IF wit0 @ 0:L1 : True
----------------------
+When wit0 = 1 :: [IF @ 0:L1]
+----------------------------
 Witnesses used: 1
 
 Stack values:
         <result> = &x = 1
 
-IF wit0 @ 0:L1 : False
-----------------------
+When wit0 = 0 :: [IF @ 0:L1]
+----------------------------
 Witnesses used: 1
 
 Stack values:
@@ -244,33 +244,33 @@ erstr = """
 Valid paths:
 ============
 
-IF wit0 @ 0:L1 : True
-IF wit1 @ 5:L3 : True
----------------------
+When wit0 = 1 :: [IF @ 0:L1]
+ And wit1 = 1 :: [IF @ 5:L3]
+----------------------------
 
-IF wit0 @ 0:L1 : True
-IF wit1 @ 5:L3 : False
-----------------------
+When wit0 = 1 :: [IF @ 0:L1]
+ And wit1 = 0 :: [IF @ 5:L3]
+----------------------------
 
-IF wit0 @ 0:L1 : False
-IF wit1 @ 13:L9 : True
-----------------------
+When wit0 = 0 :: [IF @ 0:L1]
+ And wit1 = 1 :: [IF @ 13:L9]
+-----------------------------
 
-IF wit0 @ 0:L1 : False
-IF wit1 @ 13:L9 : False
------------------------
+When wit0 = 0 :: [IF @ 0:L1]
+ And wit1 = 0 :: [IF @ 13:L9]
+-----------------------------
 
 ==============================
 Enforced constraints per path:
 ==============================
 
-IF wit0 @ 0:L1 : True
----------------------
+When wit0 = 1 :: [IF @ 0:L1]
+----------------------------
 
         BOOL(&{a}) @ END
 
-IF wit0 @ 0:L1 : False
-----------------------
+When wit0 = 0 :: [IF @ 0:L1]
+----------------------------
 
         NOT(&{b;c}) @ END
 
@@ -278,9 +278,9 @@ IF wit0 @ 0:L1 : False
 Unused values:
 ==============
 
-IF wit0 @ 0:L1 : True
-IF wit1 @ 5:L3 : False
-----------------------
+When wit0 = 1 :: [IF @ 0:L1]
+ And wit1 = 0 :: [IF @ 5:L3]
+----------------------------
         &a from 3:L2
 
 =================================
@@ -291,21 +291,21 @@ All valid paths:
 ----------------
 Witnesses used: 2
 
-IF wit0 @ 0:L1 : True
----------------------
+When wit0 = 1 :: [IF @ 0:L1]
+----------------------------
 
 Stack values:
         <result> = ADD($x, 1) : value_of_sizes(0, 1, 2, 3, 4, 5)
 
-IF wit0 @ 0:L1 : False
-----------------------
+When wit0 = 0 :: [IF @ 0:L1]
+----------------------------
 
 Stack values:
         <result> = NOT(ADD($x, 1)) : one_of(0, 1)
 
-IF wit0 @ 0:L1 : True
-IF wit1 @ 5:L3 : True
----------------------
+When wit0 = 1 :: [IF @ 0:L1]
+ And wit1 = 1 :: [IF @ 5:L3]
+----------------------------
 Witnesses used: 2
 
 Stack values:

@@ -22,25 +22,25 @@ cat >${TESTEXPECTED} <<END
 Valid paths:
 ============
 
-IF wit3 @ 4:L3 : True
-IF wit3 @ 14:L9 : True
-----------------------
+When wit3 = 1 :: [IF @ 4:L3]
+ And wit3 = 1 :: [IF @ 14:L9]
+-----------------------------
 
-IF wit3 @ 4:L3 : False
-IF wit3 @ 14:L9 : False
------------------------
+When wit3 = 0 :: [IF @ 4:L3]
+ And wit3 = 0 :: [IF @ 14:L9]
+-----------------------------
 
 ==============================
 Enforced constraints per path:
 ==============================
 
-IF wit3 @ 4:L3 : True
----------------------
+When wit3 = 1 :: [IF @ 4:L3]
+----------------------------
 
         EQUAL(1, wit2) @ END
 
-IF wit3 @ 4:L3 : False
-----------------------
+When wit3 = 0 :: [IF @ 4:L3]
+----------------------------
 
         EQUAL(2, wit1) @ END
 
@@ -48,12 +48,12 @@ IF wit3 @ 4:L3 : False
 Unused values:
 ==============
 
-IF wit3 @ 4:L3 : True
----------------------
+When wit3 = 1 :: [IF @ 4:L3]
+----------------------------
         wit1 from 1:L1
 
-IF wit3 @ 4:L3 : False
-----------------------
+When wit3 = 0 :: [IF @ 4:L3]
+----------------------------
         wit2 from 2:L1
 
 =================================
@@ -64,14 +64,14 @@ All valid paths:
 ----------------
 Witnesses used: 4
 
-IF wit3 @ 4:L3 : True
----------------------
+When wit3 = 1 :: [IF @ 4:L3]
+----------------------------
 
 Stack values:
         <result> = EQUAL(1, wit2) : one_of(0, 1)
 
-IF wit3 @ 4:L3 : False
-----------------------
+When wit3 = 0 :: [IF @ 4:L3]
+----------------------------
 
 Stack values:
         <result> = EQUAL(2, wit1) : one_of(0, 1)
@@ -80,21 +80,21 @@ Stack values:
 Warnings per path:
 ==================
 
-IF wit3 @ 4:L3 : True
----------------------
+When wit3 = 1 :: [IF @ 4:L3]
+----------------------------
         Altstack length is 1 @ END
 
-IF wit3 @ 4:L3 : False
-----------------------
+When wit3 = 0 :: [IF @ 4:L3]
+----------------------------
         Altstack length is 1 @ END
 
 ==================
 Failures per path:
 ==================
 
-IF wit3 @ 4:L3 : True
-IF wit3 @ 14:L9 : False
------------------------
+When wit3 = 1 :: [IF @ 4:L3]
+ And wit3 = 0 :: [IF @ 14:L9]
+-----------------------------
 IF @ 14:L9: check_branch_condition_invalid
 
   stack:
@@ -104,9 +104,9 @@ IF @ 14:L9: check_branch_condition_invalid
   altstack:
         wit0
 
-IF wit3 @ 4:L3 : False
-IF wit3 @ 14:L9 : True
-----------------------
+When wit3 = 0 :: [IF @ 4:L3]
+ And wit3 = 1 :: [IF @ 14:L9]
+-----------------------------
 IF @ 14:L9: check_branch_condition_invalid
 
   stack:
@@ -140,23 +140,23 @@ cat >${TESTEXPECTED} <<END
 Valid paths:
 ============
 
-IF wit0 @ 0:L1 : True
----------------------
+When wit0 = 1 :: [IF @ 0:L1]
+----------------------------
 
-IF wit0 @ 0:L1 : False
-----------------------
+When wit0 = 0 :: [IF @ 0:L1]
+----------------------------
 
 ==============================
 Enforced constraints per path:
 ==============================
 
-IF wit0 @ 0:L1 : True
----------------------
+When wit0 = 1 :: [IF @ 0:L1]
+----------------------------
 
         1 @ END
 
-IF wit0 @ 0:L1 : False
-----------------------
+When wit0 = 0 :: [IF @ 0:L1]
+----------------------------
 
         BOOL(2) @ END
 
@@ -176,15 +176,15 @@ All valid paths:
 ----------------
 Witnesses used: 2
 
-IF wit0 @ 0:L1 : True
----------------------
+When wit0 = 1 :: [IF @ 0:L1]
+----------------------------
 Witnesses used: 2
 
 Stack values:
         <result> = 1
 
-IF wit0 @ 0:L1 : False
-----------------------
+When wit0 = 0 :: [IF @ 0:L1]
+----------------------------
 Witnesses used: 2
 
 Stack values:
