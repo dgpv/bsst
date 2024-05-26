@@ -118,6 +118,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from functools import total_ordering
 from contextlib import contextmanager
+from collections import Counter
 
 import ctypes
 import ctypes.util
@@ -4155,6 +4156,7 @@ class Branchpoint:
 
             self.model_value_repr_intersection = \
                 deepcopy(self.context.model_value_repr_dict)
+
             return
 
         assert self._branches
@@ -4169,25 +4171,38 @@ class Branchpoint:
                 bp.process_child_data_intersections()
 
         possible_aliases: list[tuple[Enforcement, Enforcement]] = []
-        common_enf_difference: set[Enforcement] = set()
         common_uv_difference: set[str] = set()
         seen_enforcements_set = valid_branches[0].seen_enforcement_strings.copy()
-        common_enforcements = valid_branches[0].enforcements_intersection.copy()
         common_unused_values = valid_branches[0].unused_values_intersection.copy()
         common_mvr = deepcopy(valid_branches[0].model_value_repr_intersection)
 
-        for bp in valid_branches[1:]:
-            seen_enforcements_set.update(bp.seen_enforcement_strings)
+        enf_occurence: Counter[int] = Counter()
+
+        common_enforcements: list['Enforcement'] = []
+        for e in valid_branches[0].enforcements_intersection:
+            # when tag_enforcements_with_position is false,
+            # duplicates might be found within the same branch
+            if e in common_enforcements:
+                e_prior_i = common_enforcements.index(e)
+                possible_aliases.append((common_enforcements[e_prior_i], e))
+            else:
+                common_enforcements.append(e)
+
+        for bp_i, bp in enumerate(valid_branches[1:]):
             for e1 in common_enforcements:
+                got_match = False
                 for e2 in bp.enforcements_intersection:
                     if e1 == e2:
                         assert e1 is not e2, \
-                            ("e1 and e2 come from different branches, "
-                                "can be equal, but cannot be identical")
+                            ("when e1 and e2 come from different branches "
+                             "they can be equal, but cannot be identical")
+
+                        got_match = True
                         possible_aliases.append((e1, e2))
-                        break
-                else:
-                    common_enf_difference.add(e1)
+
+                enf_occurence[id(e1)] += int(got_match)
+
+            seen_enforcements_set.update(bp.seen_enforcement_strings)
 
             for uv_str in common_unused_values:
                 if uv_str not in bp.unused_values_intersection:
@@ -4205,7 +4220,7 @@ class Branchpoint:
             }
 
         common_enforcements = [e for e in common_enforcements
-                               if e not in common_enf_difference]
+                               if enf_occurence[id(e)] == len(valid_branches)-1]
 
         common_unused_values = [uvs for uvs in common_unused_values
                                 if uvs not in common_uv_difference]
@@ -4247,25 +4262,10 @@ class Branchpoint:
                         if not bp_mvrdict.values():
                             bp.model_value_repr_intersection.pop(name, None)
 
+        self.enforcements_intersection = common_enforcements
         self.seen_enforcement_strings = seen_enforcements_set
         self.unused_values_intersection = common_unused_values
         self.model_value_repr_intersection = common_mvr
-
-        # when tag_enforcements_with_position is false,
-        # common_enforcements might contain duplicates even now
-        enforcements_intersection = []
-        for e1 in common_enforcements:
-            for e2 in self.enforcements_intersection:
-                if e1 == e2:
-                    assert e1 is not e2, \
-                        ("e1 and e2 come from different places, "
-                         "can be equal, but cannot be identical")
-                    e2.add_dataref_aliases(e1)
-                    break
-            else:
-                enforcements_intersection.append(e1)
-
-        self.enforcements_intersection = enforcements_intersection
 
     @classmethod
     def tuple_for_sort(cls, bp: 'Branchpoint') -> tuple[int, ...]:
