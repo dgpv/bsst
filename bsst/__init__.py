@@ -3991,7 +3991,6 @@ class Branchpoint:
         ] = {}
         self.enforcements_intersection: list['Enforcement'] = []
         self.unused_values_intersection: list[str] = []
-        self.seen_enforcement_strings: set[str] = set()
 
     def get_valid_branches(self) -> tuple['Branchpoint', ...]:
         return tuple(b for b in self._branches
@@ -4050,11 +4049,12 @@ class Branchpoint:
     def get_enforcement_path(self, e: "Enforcement") -> tuple['Branchpoint', ...]:
         result: list[Branchpoint] = []
         bp = self
-        e_str = e.to_string(tag_with_position=True, is_canonical=True)
+
         while bp.parent:
             valid_branches = bp.parent.get_valid_branches()
+
             if len(valid_branches) > 1:
-                if all(e_str in bbp.seen_enforcement_strings
+                if all(e in bbp.enforcements_intersection
                        for bbp in valid_branches if bbp is not bp):
                     pass
                 else:
@@ -4140,10 +4140,6 @@ class Branchpoint:
 
         if self.context:
             assert not self.context.failure
-            self.seen_enforcement_strings = set(
-                e.to_string(tag_with_position=True, is_canonical=True)
-                for e in self.context.enforcements
-            )
 
             self.enforcements_intersection = self.context.enforcements.copy()
 
@@ -4172,7 +4168,6 @@ class Branchpoint:
 
         possible_aliases: list[tuple[Enforcement, Enforcement]] = []
         common_uv_difference: set[str] = set()
-        seen_enforcements_set = valid_branches[0].seen_enforcement_strings.copy()
         common_unused_values = valid_branches[0].unused_values_intersection.copy()
         common_mvr = deepcopy(valid_branches[0].model_value_repr_intersection)
 
@@ -4201,8 +4196,6 @@ class Branchpoint:
                         possible_aliases.append((e1, e2))
 
                 enf_occurence[id(e1)] += int(got_match)
-
-            seen_enforcements_set.update(bp.seen_enforcement_strings)
 
             for uv_str in common_unused_values:
                 if uv_str not in bp.unused_values_intersection:
@@ -4263,7 +4256,6 @@ class Branchpoint:
                             bp.model_value_repr_intersection.pop(name, None)
 
         self.enforcements_intersection = common_enforcements
-        self.seen_enforcement_strings = seen_enforcements_set
         self.unused_values_intersection = common_unused_values
         self.model_value_repr_intersection = common_mvr
 
