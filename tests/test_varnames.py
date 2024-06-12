@@ -49,10 +49,10 @@ erstr = """
 Valid paths:
 ============
 
-When wit0 = 1 :: [IF @ 9:L10]
------------------------------
+When wit0 :: [IF @ 9:L10]
+-------------------------
 
-When wit0 = 0 :: [IF @ 9:L10]
+When not wit0 :: [IF @ 9:L10]
 -----------------------------
 
 ==============================
@@ -67,12 +67,12 @@ All valid paths:
         BOOL(&b4) @ 24:L25
         1 @ END
 
-When wit0 = 1 :: [IF @ 9:L10]
------------------------------
+When wit0 :: [IF @ 9:L10]
+-------------------------
 
         BOOL(&z) @ 13:L14
 
-When wit0 = 0 :: [IF @ 9:L10]
+When not wit0 :: [IF @ 9:L10]
 -----------------------------
 
         BOOL(&b2) @ 18:L19
@@ -110,10 +110,10 @@ expected_result.append("""
 Valid paths:
 ============
 
-When wit0 = 1 :: [IF @ 9:L10]
------------------------------
+When wit0 :: [IF @ 9:L10]
+-------------------------
 
-When wit0 = 0 :: [IF @ 9:L10]
+When not wit0 :: [IF @ 9:L10]
 -----------------------------
 
 ==============================
@@ -128,12 +128,12 @@ All valid paths:
         BOOL(&b4) @ 24:L25
         1 @ END
 
-When wit0 = 1 :: [IF @ 9:L10]
------------------------------
+When wit0 :: [IF @ 9:L10]
+-------------------------
 
         BOOL(&z) @ 13:L14
 
-When wit0 = 0 :: [IF @ 9:L10]
+When not wit0 :: [IF @ 9:L10]
 -----------------------------
 
         BOOL(&b2) @ 18:L19
@@ -168,22 +168,22 @@ erstr = """
 Valid paths:
 ============
 
-When wit0 = 1 :: [IF @ 0:L1]
-----------------------------
+When wit0 :: [IF @ 0:L1]
+------------------------
 
-When wit0 = 0 :: [IF @ 0:L1]
+When not wit0 :: [IF @ 0:L1]
 ----------------------------
 
 ==============================
 Enforced constraints per path:
 ==============================
 
-When wit0 = 1 :: [IF @ 0:L1]
-----------------------------
+When wit0 :: [IF @ 0:L1]
+------------------------
 
         &x @ END
 
-When wit0 = 0 :: [IF @ 0:L1]
+When not wit0 :: [IF @ 0:L1]
 ----------------------------
 
         BOOL(&x') @ END
@@ -196,14 +196,14 @@ All valid paths:
 ----------------
 Witnesses used: 1
 
-When wit0 = 1 :: [IF @ 0:L1]
-----------------------------
+When wit0 :: [IF @ 0:L1]
+------------------------
 Witnesses used: 1
 
 Stack values:
         <result> = &x = 1
 
-When wit0 = 0 :: [IF @ 0:L1]
+When not wit0 :: [IF @ 0:L1]
 ----------------------------
 Witnesses used: 1
 
@@ -244,32 +244,32 @@ erstr = """
 Valid paths:
 ============
 
-When wit0 = 1 :: [IF @ 0:L1]
- And wit1 = 1 :: [IF @ 5:L3]
+When wit0 :: [IF @ 0:L1]
+ And wit1 :: [IF @ 5:L3]
+------------------------
+
+When wit0 :: [IF @ 0:L1]
+ And not wit1 :: [IF @ 5:L3]
 ----------------------------
 
-When wit0 = 1 :: [IF @ 0:L1]
- And wit1 = 0 :: [IF @ 5:L3]
+When not wit0 :: [IF @ 0:L1]
+ And wit1 :: [IF @ 13:L9]
 ----------------------------
 
-When wit0 = 0 :: [IF @ 0:L1]
- And wit1 = 1 :: [IF @ 13:L9]
------------------------------
-
-When wit0 = 0 :: [IF @ 0:L1]
- And wit1 = 0 :: [IF @ 13:L9]
+When not wit0 :: [IF @ 0:L1]
+ And not wit1 :: [IF @ 13:L9]
 -----------------------------
 
 ==============================
 Enforced constraints per path:
 ==============================
 
-When wit0 = 1 :: [IF @ 0:L1]
-----------------------------
+When wit0 :: [IF @ 0:L1]
+------------------------
 
         BOOL(&{a}) @ END
 
-When wit0 = 0 :: [IF @ 0:L1]
+When not wit0 :: [IF @ 0:L1]
 ----------------------------
 
         NOT(&{b;c}) @ END
@@ -278,8 +278,8 @@ When wit0 = 0 :: [IF @ 0:L1]
 Unused values:
 ==============
 
-When wit0 = 1 :: [IF @ 0:L1]
- And wit1 = 0 :: [IF @ 5:L3]
+When wit0 :: [IF @ 0:L1]
+ And not wit1 :: [IF @ 5:L3]
 ----------------------------
         &a from 3:L2
 
@@ -291,21 +291,21 @@ All valid paths:
 ----------------
 Witnesses used: 2
 
-When wit0 = 1 :: [IF @ 0:L1]
-----------------------------
+When wit0 :: [IF @ 0:L1]
+------------------------
 
 Stack values:
         <result> = ADD($x, 1) : value_of_sizes(0, 1, 2, 3, 4, 5)
 
-When wit0 = 0 :: [IF @ 0:L1]
+When not wit0 :: [IF @ 0:L1]
 ----------------------------
 
 Stack values:
         <result> = NOT(ADD($x, 1)) : one_of(0, 1)
 
-When wit0 = 1 :: [IF @ 0:L1]
- And wit1 = 1 :: [IF @ 5:L3]
-----------------------------
+When wit0 :: [IF @ 0:L1]
+ And wit1 :: [IF @ 5:L3]
+------------------------
 Witnesses used: 2
 
 Stack values:

@@ -87,10 +87,10 @@ cat >${TESTEXPECTED} <<END
 Valid paths:
 ============
 
-When wit0 = 1 :: [IF @ 1:L1]
-----------------------------
+When wit0 :: [IF @ 1:L1]
+------------------------
 
-When wit0 = 0 :: [IF @ 1:L1]
+When not wit0 :: [IF @ 1:L1]
 ----------------------------
 
 ==============================
@@ -117,7 +117,7 @@ Stack values:
 Warnings per path:
 ==================
 
-When wit0 = 0 :: [IF @ 1:L1]
+When not wit0 :: [IF @ 1:L1]
 ----------------------------
         warn_possible_success_without_sig_check @ END
 
@@ -309,10 +309,10 @@ cat >${TESTEXPECTED} <<END
 Valid paths:
 ============
 
-When \$a = 1 :: [IF @ 33:L25]
-----------------------------
+When \$a :: [IF @ 33:L25]
+------------------------
 
-When \$a = 0 :: [IF @ 33:L25]
+When not \$a :: [IF @ 33:L25]
 ----------------------------
 
 ==============================
@@ -326,13 +326,13 @@ All valid paths:
         CHECKSIGFROMSTACK(\$w6, \$w5, \$w4) @ 27:L21
         <*> EQUAL(\$w5, 0) @ END
 
-When \$a = 1 :: [IF @ 33:L25]
-----------------------------
+When \$a :: [IF @ 33:L25]
+------------------------
 
         CHECKSIGFROMSTACK(\$w7, x('11').SHA256(\$w5), \$w4) @ 42:L28
         {*} BOOL(ADD(0, CHECKSIGFROMSTACK(\$w7, x('11').SHA256(\$w5), \$w4))) @ 45:L28
 
-When \$a = 0 :: [IF @ 33:L25]
+When not \$a :: [IF @ 33:L25]
 ----------------------------
 
         CHECKSIGFROMSTACK(\$w7, x('22').SHA256(SHA256(\$w5)), \$w4) @ 42:L28
@@ -383,7 +383,7 @@ Model values:
         # Size = 32
         # Used as dependency of pubkey in CHECKMULTISIGVERIFY @ 25:L19 (in enforcement @ 25:L19)
 
-When \$a = 0 :: [IF @ 33:L25]
+When not \$a :: [IF @ 33:L25]
 ----------------------------
 Witnesses used: 0
 

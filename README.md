@@ -266,6 +266,33 @@ will be marked with `<*>` (with Z3 enabled). That does not mean that both checks
 interlocked checks might happen to be be redundant. You always need to reason about the script logic to understand
 why certain checks are marked with `<*>` and if it is wise to remove checks that seem to be redundant.
 
+### Path conditions
+
+Execution paths are defined by the conditions on which the execution is branched. These conditions are printed like this:
+
+```
+When not GREATERTHANOREQUAL(wit0, 32) :: [IF @ 27:L12]
+ And EQUAL(0, wit0) :: [IF @ 49:L23]
+ And INPUT(wit0) has no issuance :: [INSPECTINPUTISSUANCE @ 70:L45]
+-------------------------------------------------------------------
+```
+
+When the branch are created because of `IF` or `IFDUP`, it is assumed that the condition is compared with 1 for "true" branch, and with 0 for "false" branch.
+
+The "false" branch will have `not` in front of the condition.
+
+When a "script boolean" is involved, the condition will be wrapped in `BOOL()`, like this:
+
+```
+When BOOL(wit0) :: [IFDUP @ 0:L1]
+---------------------------------
+...
+
+When not BOOL(wit0) :: [IFDUP @ 0:L1]
+-------------------------------------
+...
+```
+
 ### Example report
 
 For this rather complex Elements script:

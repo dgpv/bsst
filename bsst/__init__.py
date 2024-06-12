@@ -3971,7 +3971,8 @@ class Branchpoint:
 
     def __init__(self, *, pc: int,
                  cond: Optional['SymData'] = None,
-                 designation: str = '', branch_index: int,
+                 designation: Optional[Union[str, bool]] = None,
+                 branch_index: int,
                  parent: Optional['Branchpoint'] = None,
                  context: Optional['ExecContext'] = None) -> None:
 
@@ -3981,14 +3982,14 @@ class Branchpoint:
         if cond is None and pc != 0:
             raise ValueError('cond must be supplied for non-root branch')
 
-        if cond and not designation:
+        if cond and designation is None:
             raise ValueError('designation must be supplied with cond')
 
         self.pc = pc
         self.branch_index = branch_index
         self.cond = cond
         self.cond_context = context
-        self.designation = designation
+        self.designation = '' if designation is None else designation
         self.parent = parent
 
         if not context:
@@ -4045,7 +4046,14 @@ class Branchpoint:
                 assert self.pc == 0
                 cond_str = '<root>'
 
-        result_str = f'{prefix}{cond_str} {self.designation}'
+        if isinstance(self.designation, bool):
+            assert self.cond
+            if not self.designation:
+                result_str = f'{prefix}not {cond_str}'
+            else:
+                result_str = f'{prefix}{cond_str}'
+        else:
+            result_str = f'{prefix}{cond_str} {self.designation}'
 
         if cur_env().tag_branches_with_position or force_tag_with_position:
             return (f'{result_str} :: '
@@ -5214,7 +5222,8 @@ class ExecContext(SupportsFailureCodeCallbacks):
         return self._plugin_data[pname]
 
     def branch(self: T_ExecContext, *,
-               cond: 'SymData', cond_designations: tuple[str, ...]
+               cond: 'SymData', cond_designations: Union[tuple[bool, bool],
+                                                         tuple[str, ...]]
                ) -> tuple[T_ExecContext, ...]:
 
         assert len(set(cond_designations)) == len(cond_designations)
@@ -6991,7 +7000,6 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                 # do this before branch() so any z3 constraints that is
                 # added will be present in the previous constraint frame
                 if env.minimalif_flag:
-                    cond_designations = ('= 1', '= 0')
                     branch_cond = cond
                     cond_int = cond.use_as_Int()
 
@@ -7006,7 +7014,6 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
                         cond_int = int(cond.known_bool_value)
                 else:
                     cond_int = use_as_script_bool(cond)
-                    cond_designations = ('is True', 'is False')
                     branch_cond = SymData(name='BOOL', args=(cond,))
 
                 if isinstance(cond, int):
@@ -7016,12 +7023,11 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
                 if op == OP_IF:
                     _, new_context = ctx.branch(
-                        cond=branch_cond, cond_designations=cond_designations)
+                        cond=branch_cond, cond_designations=(True, False))
                 elif op == OP_NOTIF:
                     fValue = not fValue
                     _, new_context = ctx.branch(
-                        cond=branch_cond,
-                        cond_designations=tuple(reversed(cond_designations)))
+                        cond=branch_cond, cond_designations=(False, True))
                 else:
                     assert False, "unexpected op"
 
@@ -7177,7 +7183,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
 
             _, new_context = ctx.branch(
                 cond=SymData(name='BOOL', args=(cond,)),
-                cond_designations=('is True', 'is False'))
+                cond_designations=(True, False))
 
             new_context.run_on_start(
                 lambda: Check(use_as_script_bool(cond) == 0,
