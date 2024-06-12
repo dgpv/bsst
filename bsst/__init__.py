@@ -3506,6 +3506,18 @@ def ModeTagsForOpcodes(*tags: str) -> Generator[None, None, None]:
         g_mode_tags_for_opcodes = prev_tags
 
 
+def split_always_true_sign(e_str: str) -> tuple[str, str]:
+    e_type = ''
+    for alwt in (f'{ALWAYS_TRUE_WARN_SIGN} ',
+                 f'{LOCAL_ALWAYS_TRUE_SIGN} '):
+        if e_str.startswith(alwt):
+            e_str = e_str[len(alwt):]
+            e_type = alwt[:-1]
+            break
+
+    return e_str, e_type
+
+
 def cur_plugin_name() -> str | None:
     return g_current_plugin_name
 
@@ -3991,6 +4003,7 @@ class Branchpoint:
         ] = {}
         self.enforcements_intersection: list['Enforcement'] = []
         self.unused_values_intersection: list[str] = []
+        self.seen_enforcements: dict[str, set[str]] = {}
 
     def get_valid_branches(self) -> tuple['Branchpoint', ...]:
         return tuple(b for b in self._branches
@@ -4050,16 +4063,19 @@ class Branchpoint:
         result: list[Branchpoint] = []
         bp = self
 
-        while bp.parent:
-            valid_branches = bp.parent.get_valid_branches()
+        e_str, e_type = split_always_true_sign(
+            e.to_string(tag_with_position=True, is_canonical=True))
 
-            if len(valid_branches) > 1:
-                if all(e in bbp.enforcements_intersection
-                       for bbp in valid_branches if bbp is not bp):
-                    pass
-                else:
-                    result.append(bp)
-            elif len(valid_branches) == 1:
+        while bp.parent:
+            other_branches = (bbp for bbp in bp.parent.get_valid_branches()
+                              if bbp is not bp)
+
+            if other_branches:
+                for bbp in other_branches:
+                    if bbp.seen_enforcements.get(e_str, {}) != {e_type}:
+                        result.append(bp)
+                        break
+            else:
                 if not bp.parent.is_if_branch:
                     result.append(bp)
 
@@ -4141,6 +4157,11 @@ class Branchpoint:
         if self.context:
             assert not self.context.failure
 
+            for e in self.context.enforcements:
+                e_str, e_type = split_always_true_sign(
+                    e.to_string(tag_with_position=True, is_canonical=True))
+                self.seen_enforcements[e_str] = {e_type}
+
             self.enforcements_intersection = self.context.enforcements.copy()
 
             with VarnamesDisplay():
@@ -4168,6 +4189,7 @@ class Branchpoint:
 
         possible_aliases: list[tuple[Enforcement, Enforcement]] = []
         common_uv_difference: set[str] = set()
+        seen_enforcements = deepcopy(valid_branches[0].seen_enforcements)
         common_unused_values = valid_branches[0].unused_values_intersection.copy()
         common_mvr = deepcopy(valid_branches[0].model_value_repr_intersection)
 
@@ -4196,6 +4218,12 @@ class Branchpoint:
                         possible_aliases.append((e1, e2))
 
                 enf_occurence[id(e1)] += int(got_match)
+
+            for e_str, e_types in bp.seen_enforcements.items():
+                if e_str in seen_enforcements:
+                    seen_enforcements[e_str].update(e_types)
+                else:
+                    seen_enforcements[e_str] = e_types.copy()
 
             for uv_str in common_unused_values:
                 if uv_str not in bp.unused_values_intersection:
@@ -4256,6 +4284,7 @@ class Branchpoint:
                             bp.model_value_repr_intersection.pop(name, None)
 
         self.enforcements_intersection = common_enforcements
+        self.seen_enforcements = seen_enforcements
         self.unused_values_intersection = common_unused_values
         self.model_value_repr_intersection = common_mvr
 
