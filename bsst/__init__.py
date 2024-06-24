@@ -451,9 +451,10 @@ class SymEnvironment:
         issue with the script (like, doing `$data DUP EQUALVERIFY` instead of
         `DUP $data EQUALVERIFY`), or an opportunity for optimization, if after
         further analysis it is obvious that other conditions make this
-        'always true' enforcement unnecessary. Sometimes the enforcement is
-        'always true' only in particular execution path (see
-        `mark_path_local_always_true_enforcements`).
+        'always true' enforcement unnecessary.
+
+        Sometimes the enforcement is 'always true' only in particular
+        execution path - see `mark_path_local_always_true_enforcements`.
 
         Sometimes 'always true' condition for enforcements can also be detected
         without use of Z3, this settings will not affect these cases.
@@ -468,6 +469,27 @@ class SymEnvironment:
     @check_always_true_enforcements.setter
     def check_always_true_enforcements(self, value: bool) -> None:
         self._check_always_true_enforcements = value
+
+    @property
+    def hide_always_true_enforcements(self) -> bool:
+        """In the report, hide enforcements that are detected 'always true'
+        in each path they appear in. Path-local 'always true' enforcements
+        will still be shown.
+
+        If `check_always_true_enforcements` is false, this setting will
+        also be forced to be false
+
+        If true, the report will have a warning that this setting is in effect.
+        """
+
+        if not self._check_always_true_enforcements:
+            return False
+
+        return self._hide_always_true_enforcements
+
+    @hide_always_true_enforcements.setter
+    def hide_always_true_enforcements(self, value: bool) -> None:
+        self._hide_always_true_enforcements = value
 
     @property
     def log_progress(self) -> bool:
@@ -1219,6 +1241,7 @@ class SymEnvironment:
         self._report_model_value_sizes = False
         self._sort_model_values = 'default'
         self._check_always_true_enforcements = True
+        self._hide_always_true_enforcements = False
         self._exit_on_solver_result_unknown = True
         self._tag_data_with_position = False
         self._use_deterministic_arguments_order = True
@@ -4161,6 +4184,7 @@ class Branchpoint:
                     e.is_always_true_global = e.is_always_true_in_path
 
     def process_child_data_intersections(self) -> None:  # noqa
+        env = cur_env()
 
         if self.context:
             assert not self.context.failure
@@ -4170,7 +4194,13 @@ class Branchpoint:
                     e.to_string(tag_with_position=True, is_canonical=True))
                 self.seen_enforcements[e_str] = {e_type}
 
-            self.enforcements_intersection = self.context.enforcements.copy()
+            if env.hide_always_true_enforcements:
+                self.enforcements_intersection = [
+                    e for e in self.context.enforcements
+                    if not e.is_always_true_global
+                ]
+            else:
+                self.enforcements_intersection = self.context.enforcements.copy()
 
             with VarnamesDisplay():
                 with CurrentExecContext(self.context):
@@ -10032,6 +10062,13 @@ def report() -> None:  # noqa
 
     if got_unexplored:
         print_as_header('NOTE: There are execution paths that was not explored')
+
+    if env.hide_always_true_enforcements:
+        print_as_header([
+            'WARNING: The setting "hide always true enforcements" is in effect.',
+            '         Enforcements that are detected as "always true" in each ',
+            '         path they appear in, will not be shown. ',
+            '         Path-local "always true" enforcements will still be shown.'])
 
     if valid_paths:
         print_as_header('Valid paths:')

@@ -488,7 +488,7 @@ without installing `bsst` python module.
 
         Pattern can be suffexed with ':' followed by the number of samples to
         produce. For example, 'wit*:3' will produce 3 samples for each witness.
-        By default, 1 sample for each analyzed value will be produced.
+        By default, 1 sample for each model value will be produced.
 
         Note that if the value itself was never accessed by the script,
         the model value for it will not be produced, even if the
@@ -529,12 +529,24 @@ without installing `bsst` python module.
         issue with the script (like, doing `$data DUP EQUALVERIFY` instead of
         `DUP $data EQUALVERIFY`), or an opportunity for optimization, if after
         further analysis it is obvious that other conditions make this
-        'always true' enforcement unnecessary. Sometimes the enforcement is
-        'always true' only in particular execution path (see
-        `--mark-path-local-always-true-enforcements`).
+        'always true' enforcement unnecessary.
+
+        Sometimes the enforcement is 'always true' only in particular
+        execution path - see `--mark-path-local-always-true-enforcements`.
 
         Sometimes 'always true' condition for enforcements can also be detected
         without use of Z3, this settings will not affect these cases.
+
+  --hide-always-true-enforcements=false
+
+        In the report, hide enforcements that are detected 'always true'
+        in each path they appear in. Path-local 'always true' enforcements
+        will still be shown.
+
+        If `--check-always-true-enforcements` is false, this setting will
+        also be forced to be false
+
+        If true, the report will have a warning that this setting is in effect.
 
   --log-progress=true
 
@@ -708,6 +720,13 @@ without installing `bsst` python module.
         counter at the time it was enforced by the secipt. This will make the
         analysis treat such enforcements as unique within each execution path,
         even if the enforced conditions might be the same
+
+  --tag-branches-with-position=true
+
+        If true, each branch path will be tagged with the value of program
+        counter at the time the branch was created. This will make the
+        analysis treat such paths as unique, even if the branch conditions
+        might be the same
 
   --use-deterministic-arguments-order=true
 
