@@ -8056,7 +8056,7 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
             num_sigs = nSigsCount.as_scriptnum_int()
             if num_sigs < 0 or num_sigs > num_keys:
                 raise ScriptFailure(
-                    f'{op.name}: invalid signature count {nKeysCount.as_scriptnum_int()}')
+                    f'{op.name}: invalid signature count {nSigsCount.as_scriptnum_int()}')
 
             signatures = []
             for _ in range(num_sigs):
