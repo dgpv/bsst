@@ -7931,19 +7931,20 @@ def _symex_op(ctx: ExecContext, op_or_sd: OpCode | ScriptData  # noqa
             if env.sigversion == SigVersion.TAPSCRIPT:
                 maybe_upgradeable_pub = add_xonly_pubkey_constraints(vchPubKey)
                 htype = add_schnorr_sig_constraints(vchSig, maybe_upgradeable_pub)
+                checksig_could_succeed = (vchSig.Length() > 0)
             else:
                 htype, is_valid_R_S = add_ecdsa_sig_constraints(vchSig)
-                checksig_could_succeed = And(is_valid_R_S,
+                checksig_could_succeed = And(vchSig.Length() > 0,
+                                             is_valid_R_S,
                                              add_pubkey_constraints(vchPubKey))
-                Check(Implies(Not(checksig_could_succeed), r.as_Int() == 0))
+
+            Check(Implies(Not(checksig_could_succeed), r.as_Int() == 0))
 
             add_checksig_arg_constraints(vchSig, vchPubKey, htype, r.as_Int())
 
             if env.nullfail_flag:
-                Check((vchSig.Length() == 0) == (r.as_Int() == 0),
+                Check(Implies(r.as_Int() == 0, vchSig.Length() == 0),
                       err_signature_nullfail())
-            else:
-                Check(Implies(vchSig.Length() == 0, r.as_Int() == 0))
 
             if op == OP_CHECKSIGVERIFY:
                 Check(r.as_Int() != 0, err_checksigverify(),
