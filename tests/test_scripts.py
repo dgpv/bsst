@@ -16,6 +16,7 @@ from test_util import CaptureStdout
 
 @contextmanager
 def FreshEnv(*, z3_enabled: bool = False, is_tapscript: bool = False,
+             is_witness_v0: bool = False,
              assume_no_160bit_hash_collisions: bool = False,
              nullfail_flag: bool = True,
              ) -> Generator[bsst.SymEnvironment, None, None]:
@@ -27,7 +28,11 @@ def FreshEnv(*, z3_enabled: bool = False, is_tapscript: bool = False,
     env.assume_no_160bit_hash_collisions = assume_no_160bit_hash_collisions
     env.nullfail_flag = nullfail_flag
     if is_tapscript:
+        assert not is_witness_v0
         env.sigversion = bsst.SigVersion.TAPSCRIPT
+    elif is_witness_v0:
+        assert not is_tapscript
+        env.sigversion = bsst.SigVersion.WITNESS_V0
     else:
         env.sigversion = bsst.SigVersion.BASE
 
@@ -67,7 +72,9 @@ def process_contexts(env: bsst.SymEnvironment) -> None:
 
 
 def do_test_single(script: str, *,
-                   z3_enabled: bool = False, is_tapscript: bool = False,
+                   z3_enabled: bool = False,
+                   is_tapscript: bool = False,
+                   is_witness_v0: bool = False,
                    assume_no_160bit_hash_collisions: bool = False,
                    expect_failures: Iterable[str] = (),
                    num_successes: int = 1,
@@ -77,7 +84,8 @@ def do_test_single(script: str, *,
     print(f'z3_enabled: {z3_enabled}')
     print()
 
-    with FreshEnv(z3_enabled=z3_enabled, is_tapscript=is_tapscript,
+    with FreshEnv(z3_enabled=z3_enabled,
+                  is_tapscript=is_tapscript, is_witness_v0=is_witness_v0,
                   assume_no_160bit_hash_collisions=assume_no_160bit_hash_collisions,
                   nullfail_flag=nullfail_flag
                   ) as env:
@@ -592,6 +600,12 @@ def test() -> None:
 
     do_test_single("DUP DUP VERIFY IF VERIFY ELSE 2 ENDIF",
                    z3_enabled=True, expect_failures=['check_branch_condition_invalid', 'check_data_too_long', 'check_verify'])
+
+    failures = do_test_single('$b dup 1 sub not verify 0 $p 1 checkmultisig',
+                              z3_enabled=True, expect_failures=['check_checkmultisig_bugbyte_zero', 'check_verify'],
+                              is_witness_v0=True, num_successes=0)
+
+    assert 'check_checkmultisig_bugbyte_zero' in failures
 
 
 if __name__ == '__main__':
