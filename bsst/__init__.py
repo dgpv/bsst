@@ -9889,10 +9889,8 @@ def _finalize(ctx: ExecContext, env: SymEnvironment) -> None:  # noqa
 
                 is_verify_target = (op is None
                                     or op in (OP_VERIFY, OP_EQUALVERIFY,
-                                              OP_NUMEQUALVERIFY)
-                                    # 'bugbyte' check
-                                    or (op == OP_CHECKMULTISIGVERIFY
-                                        and e.cond.name == 'EQUAL'))
+                                              OP_NUMEQUALVERIFY))
+
                 if is_verify_target:
                     verify_targets.append(e)
 
