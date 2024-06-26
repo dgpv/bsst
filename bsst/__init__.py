@@ -9905,8 +9905,14 @@ def _finalize(ctx: ExecContext, env: SymEnvironment) -> None:  # noqa
 
                 try:
                     ename = f'{e.cond} @ {op_pos_info(e.pc)}'
-                    if not is_cond_possible(use_as_script_bool(e.cond) == 0,
-                                            e.cond, name=ename,
+                    if e.is_script_bool:
+                        cond_to_check = (use_as_script_bool(e.cond) == 0)
+                    else:
+                        assert e.cond.was_used_as_Int, \
+                            "e.cond expected to be from EQUALVERIFY or NUMEQUALVERIFY"
+                        cond_to_check = (e.cond.as_Int() == 0)
+
+                    if not is_cond_possible(cond_to_check, e.cond, name=ename,
                                             fail_msg='  - always true'):
                         e.is_always_true_in_path = True
                 finally:
