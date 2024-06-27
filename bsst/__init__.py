@@ -11188,7 +11188,7 @@ def main_cli() -> None:
             pass
 
 
-VERSION = "0.1.3.dev0"
+VERSION = "0.1.3"
 
 if __name__ == '__main__':
     main_cli()
