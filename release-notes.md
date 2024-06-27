@@ -1,8 +1,49 @@
 # B'SST release notes
 
-Version 0.1.3.dev0
+Version 0.1.3
 
-Fix transaction version restriction: standard transaction versions are currenlty only 1 or 2, and for miner mode, transaction versions are not restricted at all
+* Use actual conditions to designate paths, instead of opcodes with args
+
+    Instead of
+
+    ```
+    IF wit0 @ 0:L1 : True
+    NOTIF wit1 @ 1:L1 : False
+    IFDUP wit2 @ 2:L1 : True
+    -------------------------
+    ```
+
+    Paths will be shown as
+
+
+    ```
+    When wit0 :: [IF @ 0:L1]
+     And not wit1 :: [NOTIF @ 1:L1]
+     And BOOL(wit2) :: [IFDUP @ 2:L1]
+    ---------------------------------
+    ```
+
+* Fix settig 520-byte limit for witness 0: Due to trivial error, the 520-byte limit was not set for witness 0 when first accessing it. This limit will be usually set in other places, too, so it is unclear if this would ever surface as a problem, so this is a minor bug, but a bug nevertheless.
+
+* Fix transaction version restriction: standard transaction versions are currenlty only 1 or 2, and for miner mode, transaction versions are not restricted at all
+
+* Fix bug in processing of intersection of enforcements
+
+* Fix data reference display in paths for witness info
+
+* Fix handling of empty signatures for CHECKSIG
+
+* Fix error message on CHECKMULTISIG invalid sig count
+
+* Add --hide-always-true-enforcements setting
+
+* Improve processing of intersection of enforcements in different execution paths
+
+* Restrict introspected scriptpubkey length for inputs (when --is-miner=false)
+
+* Show full paths for "Finalizing path" messages in log
+
+* Display unused values per-path instead of 'unused in all paths'
 
 Version 0.1.2
 
