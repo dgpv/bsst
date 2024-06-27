@@ -423,7 +423,7 @@ def test() -> None:
         out = output.getvalue()
 
     print(out)
-    assert ("IF wit0 @ 0:L1 : True\n---------------------\n\n        <*> EQUAL(wit1, wit2) @ 2:L1\n        <*> EQUAL(1, wit1) @ 4:L1\n        <*> EQUAL(1, wit2) @ 6:L1\n\n"
+    assert ("When BOOL(wit0) :: [IF @ 0:L1]\n------------------------------\n\n        <*> EQUAL(wit1, wit2) @ 2:L1\n        <*> EQUAL(1, wit1) @ 4:L1\n        <*> EQUAL(1, wit2) @ 6:L1\n\n"
             in out)
 
     out = ''
@@ -433,7 +433,7 @@ def test() -> None:
         out = output.getvalue()
 
     print(out)
-    assert ("IF wit0 @ 0:L1 : True\n---------------------\n\n        <*> EQUAL(1, wit1) @ 3:L1\n        <*> EQUAL(1, wit2) @ 5:L1\n        {*} EQUAL(wit1, wit2) @ 7:L1\n\n"
+    assert ("When BOOL(wit0) :: [IF @ 0:L1]\n------------------------------\n\n        <*> EQUAL(1, wit1) @ 3:L1\n        <*> EQUAL(1, wit2) @ 5:L1\n        {*} EQUAL(wit1, wit2) @ 7:L1\n\n"
             in out)
 
     do_test_single("le64(1) x('1000000000000080') MUL64 DROP",
