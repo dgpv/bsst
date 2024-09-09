@@ -1,5 +1,11 @@
 # B'SST release notes
 
+Version 0.1.4
+
+* License of the project has been changed to GNU AGPLv3
+
+* Fix invalid f-string syntax in ConstrainedValue class
+
 Version 0.1.3
 
 * Use actual conditions to designate paths, instead of opcodes with args

@@ -29,11 +29,7 @@ will obviously never be a 100%, consensus-correct, match.
 
 ## License
 
-Free for non-commercial use. Licensed under Prosperity Public License 3.0.0.
-This license allows for thirty-day trial period for commercial purposes. There are also
-exemptions for educational institutions, public research organizations, etc.
-Please read LICENSE.md for the full text of the license.
-For inquiries, please write to license@bsst.dev
+Gnu Affero General Puplic License 3.0, see LICENSE.md
 
 Contains portions of the code that were originally released under MIT software
 license. These are code of the CSHA256 class (derived from MIT-licensed code,

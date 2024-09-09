@@ -1,93 +1,20 @@
 #!/usr/bin/env python3
-# This program is released under Prosperity Public License 3.0.0
-# The text of the license follows:
-"""
-# The Prosperity Public License 3.0.0
-
-Contributor: Dmitry Petukhov (https://github.com/dgpv), dp@bsst.dev
-
-Source Code: https://github.com/dgpv/bsst
-
-## Purpose
-
-This license allows you to use and share this software for noncommercial
-purposes for free and to try this software for commercial purposes for thirty
-days.
-
-## Agreement
-
-In order to receive this license, you have to agree to its rules.
-Those rules are both obligations under that agreement and conditions to your
-license.  Don't do anything with this software that triggers a rule you can't
-or won't follow.
-
-## Notices
-
-Make sure everyone who gets a copy of any part of this software from you, with
-or without changes, also gets the text of this license and the contributor and
-source code lines above.
-
-## Commercial Trial
-
-Limit your use of this software for commercial purposes to a thirty-day trial
-period.  If you use this software for work, your company gets one trial period
-for all personnel, not one trial per person.
-
-## Contributions Back
-
-Developing feedback, changes, or additions that you contribute back to the
-contributor on the terms of a standardized public software license such as
-[the Blue Oak Model License 1.0.0](https://blueoakcouncil.org/license/1.0.0),
-[the Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0.html),
-[the MIT license](https://spdx.org/licenses/MIT.html), or
-[the two-clause BSD license](https://spdx.org/licenses/BSD-2-Clause.html)
-doesn't count as use for a commercial purpose.
-
-## Personal Uses
-
-Personal use for research, experiment, and testing for the benefit of public
-knowledge, personal study, private entertainment, hobby projects, amateur
-pursuits, or religious observance, without any anticipated commercial
-application, doesn't count as use for a commercial purpose.
-
-## Noncommercial Organizations
-
-Use by any charitable organization, educational institution, public research
-organization, public safety or health organization, environmental protection
-organization, or government institution doesn't count as use for a commercial
-purpose regardless of the source of funding or obligations resulting from the
-funding.
-
-## Defense
-
-Don't make any legal claim against anyone accusing this software, with or
-without changes, alone or with other technology, of infringing any patent.
-
-## Copyright
-
-The contributor licenses you to do everything with this software that would
-otherwise infringe their copyright in it.
-
-## Patent
-
-The contributor licenses you to do everything with this software that would
-otherwise infringe any patents they can license or become able to license.
-
-## Reliability
-
-The contributor can't revoke this license.
-
-## Excuse
-
-You're excused for unknowingly breaking [Notices](#notices) if you take all
-practical steps to comply within thirty days of learning you broke the rule.
-
-## No Liability
-
-AS FAR AS THE LAW ALLOWS, THIS SOFTWARE COMES AS IS, WITHOUT ANY WARRANTY
-OR CONDITION, AND THE CONTRIBUTOR WON'T BE LIABLE TO ANYONE FOR ANY DAMAGES
-RELATED TO THIS SOFTWARE OR THIS LICENSE, UNDER ANY KIND OF LEGAL CLAIM.
-"""
+# Copyright (c) 2023 Dmitry Petukhov (https://github.com/dgpv), dp@bsst.dev
+#
+# This file is part of B'SST: Bitcoin-like Script Symbolic Tracer
+#
+# B'SST is free software: you can redistribute it and/or modify it
+# under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License,
+# or (at your option) any later version.
+#
+# B'SST is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+#
+# See the GNU Affero General Public License for more details.
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # NOTE: while types for values from z3 module are given, because at the
 # time of writing the z3 python module did not have typing, effectively
@@ -11062,7 +10989,8 @@ def usage() -> None:
 
 
 def show_license() -> None:
-    print(sys.modules['bsst'].__doc__)
+    print("GNU Affero General Public License Version 3: https://www.gnu.org/licenses/agpl-3.0.en.html")
+
 
 def parse_cmdline_args(args: Iterable[str]) -> None:  # noqa
     env = cur_env()
@@ -11188,7 +11116,7 @@ def main_cli() -> None:
             pass
 
 
-VERSION = "0.1.3"
+VERSION = "0.1.4"
 
 if __name__ == '__main__':
     main_cli()
