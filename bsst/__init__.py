@@ -4689,9 +4689,9 @@ class ConstrainedValue:
             if not new_bvset:
                 raise ScriptFailure(
                     f'trying to set constrained value(s) '
-                    f'({b.hex() for b in bvset}) that '
+                    f'({[b.hex() for b in bvset]}) that '
                     f'do not match previously set value(s) '
-                    f'({b.hex() for b in old_bvset})')
+                    f'({[b.hex() for b in old_bvset]})')
         else:
             new_bvset = bvset
 
